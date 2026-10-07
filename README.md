@@ -4,9 +4,22 @@ Phone-as-trackpad and presentation remote for macOS. No app install on the phone
 
 ## Start (Mac)
 
+**Menu bar app (easiest).** Download `Lectern.app.zip` from the latest release, unzip, move
+`Lectern.app` to Applications and open it. It is not notarized, so the first time macOS will say
+it "cannot verify" the app: right-click → Open once, or run `xattr -d com.apple.quarantine
+/Applications/Lectern.app`. The app sits in the menu bar, starts the server on launch with the
+tunnel on (turn it off in the menu for a normal home network), shows the address it is serving,
+opens the pairing QR, and stops everything when you quit. It needs the Xcode Command Line Tools
+(`xcode-select --install`) for Python and the laser overlay; nothing else.
+
+Or build it yourself with `./build-app.sh` (output in `dist/`).
+
+**Terminal.**
+
 ```
 cd lectern
-python3 lectern.py
+python3 lectern.py            # direct Wi-Fi
+python3 lectern.py --tunnel   # through Cloudflare, for networks that isolate clients
 ```
 
 (or double-click `start.command`; if Finder blocks it, right-click → Open once)
@@ -43,6 +56,17 @@ Present tab: Back / Next (arrow keys), laser (hold and drag), Blank (`B`, works 
 - **Silence** runs a Shortcut named `Lectern Focus`, because macOS has no command-line switch for Do Not Disturb. Create it in Shortcuts: *Set Focus → Do Not Disturb → Toggle*.
 - Wake Lock needs HTTPS; the page keeps the phone awake with a 1.5 kB looping muted video instead.
 - Anyone on the network with the key URL can control the Mac. Delete `~/.config/lectern/token` to rotate the key.
+
+## Running it yourself
+
+Everything runs on your own Mac; nothing is hosted. The tunnel modes use Cloudflare:
+
+- **Quick tunnel** (no account): `--tunnel` with no setup gives a random `trycloudflare.com`
+  address that changes every run.
+- **Named tunnel** (fixed address, lets the phone install the page as an app): you need a
+  Cloudflare account with a domain on it. Run `cloudflared tunnel login` once, then
+  `python3 lectern.py --tunnel-setup lectern.yourdomain.com`. That creates a tunnel named
+  `lectern` in your account and the DNS record; `--tunnel` uses it from then on.
 
 ## Options
 

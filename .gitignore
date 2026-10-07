@@ -5,3 +5,4 @@ tests/.ui-server.log
 tests/screenshots/
 .DS_Store
 .claude/
+dist/
