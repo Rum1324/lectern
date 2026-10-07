@@ -698,6 +698,18 @@ class Server:
             body = json.dumps({"urls": self.urls(), "key": self.token}).encode()
             await self._respond(writer, 200, body, "application/json")
             return
+        # The installed app launches start_url, so it must carry the pairing key; serve the
+        # manifest only to a page that already has the key, so the key never leaks via it.
+        if path == "/manifest.webmanifest":
+            if not secrets.compare_digest(params.get("k", ""), self.token):
+                await self._respond(writer, 404, b"not found", "text/plain")
+                return
+            with open(os.path.join(WEB, "manifest.webmanifest")) as f:
+                manifest = json.load(f)
+            manifest["start_url"] = "/?k=" + self.token
+            await self._respond(writer, 200, json.dumps(manifest).encode(),
+                                "application/manifest+json")
+            return
         if path in ("/", "/index.html"):
             path = "/index.html"
         fp = os.path.normpath(os.path.join(WEB, path.lstrip("/")))

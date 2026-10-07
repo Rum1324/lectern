@@ -1,7 +1,7 @@
 // Lectern service worker: lets Android Chrome install the page as an app and open it
 // instantly. Only the app shell is cached; /ws and everything else go straight to the network.
-const CACHE = "lectern-v1";
-const SHELL = ["/", "/manifest.webmanifest", "/icon.png", "/icon-192.png", "/icon-512.png"];
+const CACHE = "lectern-v2";
+const SHELL = ["/", "/icon.png", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

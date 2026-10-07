@@ -9,7 +9,6 @@
 <meta name="apple-mobile-web-app-title" content="Lectern">
 <meta name="theme-color" content="#0E0E10">
 <link rel="apple-touch-icon" href="/icon.png">
-<link rel="manifest" href="/manifest.webmanifest">
 <title>Lectern</title>
 <style>
   :root{
@@ -210,6 +209,9 @@
     if (key) localStorage.setItem("lectern.k", key); else key = localStorage.getItem("lectern.k");
   } catch (e) {}
   if (!key) { $("#gate").classList.add("show"); return; }
+  // Manifest is served only with the key, and its start_url carries the key, so the installed
+  // app pairs even if this origin's storage is empty when it launches.
+  { const l = document.createElement("link"); l.rel = "manifest"; l.href = "/manifest.webmanifest?k=" + encodeURIComponent(key); document.head.appendChild(l); }
 
   // ---------- connection
   let ws = null, backoff = 400, pingTimer = null, pingSent = 0;

@@ -204,11 +204,15 @@ class ProtocolTest(unittest.TestCase):
             data += c
         s.close()
         self.last_headers = data.split(b"\r\n\r\n", 1)[0].decode("latin-1").lower()
+        self.last_body = data.split(b"\r\n\r\n", 1)[1].decode("utf-8", "replace")
         return int(data.split(b" ")[1])
 
     def test_app_manifest_and_service_worker_types(self):
-        self.assertEqual(self.http("/manifest.webmanifest"), 200)
+        self.assertEqual(self.http("/manifest.webmanifest"), 404)  # key required
+        self.assertEqual(self.http("/manifest.webmanifest?k=wrong"), 404)
+        self.assertEqual(self.http("/manifest.webmanifest?k=" + KEY), 200)
         self.assertIn("content-type: application/manifest+json", self.last_headers)
+        self.assertIn('"start_url": "/?k=%s"' % KEY, self.last_body)
         self.assertEqual(self.http("/sw.js"), 200)
         self.assertIn("content-type: text/javascript", self.last_headers)
         self.assertEqual(self.http("/icon-512.png"), 200)

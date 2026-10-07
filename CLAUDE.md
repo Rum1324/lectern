@@ -66,6 +66,9 @@ tests/            protocol + UI tests (see above)
 Phone page ⇄ WebSocket `/ws?k=<key>` ⇄ `Server.dispatch` → `Controller` → backend.
 With `--tunnel`: phone ⇄ Cloudflare edge ⇄ cloudflared (child process, `Tunnel`) ⇄ localhost.
 The page is a PWA when served over HTTPS: `manifest.webmanifest` + `sw.js` (shell cache only).
+The manifest is served only with `?k=<key>` (the page adds the link after it knows the key)
+and its `start_url` is `/?k=<key>`, so the installed app pairs even when the origin's
+localStorage is empty at launch (Sota hit "Not paired" with a plain `/` start_url).
 The pairing key lives in the phone's localStorage, so the installed app's `start_url` is `/`.
 Backend is `MacBackend` (ctypes → CoreGraphics `CGEventPost`) or `DryRunBackend` (logs).
 
