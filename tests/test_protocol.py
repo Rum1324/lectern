@@ -216,3 +216,27 @@ class ProtocolTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TunnelTest(unittest.TestCase):
+    """Pure-function checks for the cloudflared quick-tunnel support (no network)."""
+
+    def setUp(self):
+        sys.path.insert(0, ROOT)
+        import lectern
+        self.lectern = lectern
+
+    def test_parse_url_from_cloudflared_banner(self):
+        line = ("2026-10-07T17:00:00Z INF |  https://quiet-river-tulip-sky.trycloudflare.com"
+                "                                   |")
+        self.assertEqual(self.lectern.parse_tunnel_url(line),
+                         "https://quiet-river-tulip-sky.trycloudflare.com")
+        self.assertIsNone(self.lectern.parse_tunnel_url("INF Registered tunnel connection"))
+
+    def test_tunnel_url_comes_first_in_pairing_urls(self):
+        import argparse
+        a = argparse.Namespace(port=1, token="K", dry_run=True, host="0.0.0.0",
+                               no_browser=True, tunnel=True)
+        s = self.lectern.Server(a)
+        s.tunnel.url = "https://a-b-c-d.trycloudflare.com"
+        self.assertEqual(s.urls()[0], "https://a-b-c-d.trycloudflare.com/?k=K")

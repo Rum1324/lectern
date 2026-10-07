@@ -11,15 +11,21 @@ import base64
 import ctypes
 import ctypes.util
 import hashlib
+import io
 import json
 import mimetypes
 import os
+import platform
+import re
 import secrets
+import shutil
 import socket
 import struct
 import subprocess
 import sys
+import tarfile
 import time
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(HERE, "web")
@@ -225,6 +231,107 @@ class Laser:
             self._send("quit")
 
 
+# --------------------------------------------------------------------------- tunnel
+TUNNEL_URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
+CLOUDFLARED_DL = ("https://github.com/cloudflare/cloudflared/releases/latest/download/"
+                  "cloudflared-darwin-%s.tgz")
+
+
+def parse_tunnel_url(text):
+    """First https://*.trycloudflare.com URL in cloudflared's output, or None."""
+    m = TUNNEL_URL_RE.search(text)
+    return m.group(0) if m else None
+
+
+class Tunnel:
+    """Cloudflare quick tunnel: a public HTTPS URL that reaches this Mac from any network.
+
+    Needed where the Wi-Fi isolates clients (campus networks), so the phone can't reach the
+    laptop directly. The URL changes every run; the phone's home-screen bookmark lasts one
+    session. Adds internet round-trip latency; the phone shows it next to the host name.
+    """
+
+    def __init__(self, port):
+        self.port = port
+        self.proc = None
+        self.url = None
+
+    def binary(self):
+        found = shutil.which("cloudflared")
+        if found:
+            return found
+        local = os.path.join(CONF_DIR, "cloudflared")
+        if os.path.exists(local):
+            return local
+        arch = "arm64" if platform.machine() == "arm64" else "amd64"
+        print("  tunnel: downloading cloudflared (%s)..." % arch, flush=True)
+        data = urllib.request.urlopen(CLOUDFLARED_DL % arch, timeout=120).read()
+        os.makedirs(CONF_DIR, exist_ok=True)
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+            member = next(m for m in tar.getmembers() if m.name.endswith("cloudflared"))
+            with tar.extractfile(member) as f, open(local, "wb") as out:
+                out.write(f.read())
+        os.chmod(local, 0o755)
+        return local
+
+    async def start(self, timeout=40.0):
+        """Starts cloudflared and returns the public URL once it answers, or None."""
+        try:
+            binary = await asyncio.to_thread(self.binary)
+        except Exception as e:  # download failed, no network, etc.
+            print("  tunnel: cloudflared unavailable:", e, flush=True)
+            return None
+        # cloudflared silently loads ~/.cloudflared/config.yml if one exists. A named-tunnel
+        # config there (with its own ingress rules and a catch-all 404) would override --url
+        # and every request through the quick tunnel would 404, so give it our own config.
+        os.makedirs(CONF_DIR, exist_ok=True)
+        cfg = os.path.join(CONF_DIR, "cloudflared.yml")
+        with open(cfg, "w") as f:
+            f.write("url: http://localhost:%d\n" % self.port)
+        self.proc = await asyncio.create_subprocess_exec(
+            binary, "tunnel", "--config", cfg, "--no-autoupdate",
+            "--url", "http://localhost:%d" % self.port,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+        deadline = time.monotonic() + timeout
+        while self.url is None and time.monotonic() < deadline:
+            try:
+                line = await asyncio.wait_for(self.proc.stderr.readline(),
+                                              deadline - time.monotonic())
+            except asyncio.TimeoutError:
+                break
+            if not line:
+                break
+            self.url = parse_tunnel_url(line.decode("utf-8", "replace"))
+        if self.url is None:
+            self.close()
+            return None
+        # Keep draining stderr for the life of the process, or cloudflared blocks on a full pipe.
+        asyncio.ensure_future(self._drain())
+        # The edge takes a few seconds to route the new hostname; wait until it answers so
+        # the QR code isn't scanned into a Cloudflare error page.
+        while time.monotonic() < deadline:
+            if await asyncio.to_thread(self._answers):
+                return self.url
+            await asyncio.sleep(1)
+        return self.url  # routed late; the phone page retries on its own
+
+    async def _drain(self):
+        while await self.proc.stderr.readline():
+            pass
+
+    def _answers(self):
+        try:
+            with urllib.request.urlopen(self.url + "/icon.png", timeout=5) as r:
+                return r.status == 200
+        except Exception:
+            return False
+
+    def close(self):
+        if self.proc and self.proc.returncode is None:
+            self.proc.terminate()
+        self.url = None
+
+
 # --------------------------------------------------------------------------- controller
 class Controller:
     def __init__(self, backend, laser):
@@ -362,6 +469,7 @@ class Server:
         self.ctl = Controller(self.backend, self.laser)
         self.token = self._load_token()
         self.clients = set()
+        self.tunnel = Tunnel(args.port) if args.tunnel else None
 
     def _load_token(self):
         if self.args.token:
@@ -466,7 +574,7 @@ class Server:
         peer = writer.get_extra_info("peername")
         print("  phone connected:", peer[0] if peer else "?", flush=True)
         self.clients.add(writer)
-        await ws_send(writer, {"t": "hello", "host": socket.gethostname(),
+        await ws_send(writer, {"t": "hello", "host": mac_name(),
                                "trusted": self.backend.trusted()})
         v = await volume("get", self.dry)
         if v:
@@ -528,6 +636,8 @@ class Server:
     def urls(self):
         port, k = self.args.port, self.token
         out = []
+        if self.tunnel and self.tunnel.url:
+            out.append("%s/?k=%s" % (self.tunnel.url, k))
         for ip in lan_ips():
             out.append("http://%s:%d/?k=%s" % (ip, port, k))
         # name.local survives IP changes but some Android versions can't resolve it, so it's 2nd
@@ -541,9 +651,21 @@ class Server:
                 pass
         return out
 
+    def _tunnel_failed(self):
+        """Called when --tunnel was requested but no public URL came up within the timeout."""
+        # TODO(human): decide the policy. Options: (a) keep running on LAN only and print a
+        # warning with the likely causes (no internet, GitHub download blocked, cloudflared
+        # crashed); (b) retry once; (c) exit non-zero so start.command's window shows the
+        # failure. Whatever you choose, remember Sota's venue usually has no working LAN path.
+        print("  tunnel: no public URL; continuing with LAN addresses only.", flush=True)
+
     async def run(self):
         srv = await asyncio.start_server(self.handle, self.args.host, self.args.port)
         await self.laser.prepare()
+        if self.tunnel:
+            print("  tunnel: starting cloudflared...", flush=True)
+            if await self.tunnel.start() is None:
+                self._tunnel_failed()
         print("\nLectern is running%s." % (" (dry run: nothing is moved)" if self.dry else ""))
         for u in self.urls():
             print("  open on your phone:", u)
@@ -558,6 +680,19 @@ class Server:
         print("\n  Ctrl+C to stop.\n", flush=True)
         async with srv:
             await srv.serve_forever()
+
+
+def mac_name():
+    """The name from System Settings; gethostname() gives the DHCP name on campus Wi-Fi."""
+    if sys.platform == "darwin":
+        try:
+            name = subprocess.run(["scutil", "--get", "ComputerName"],
+                                  capture_output=True, text=True).stdout.strip()
+            if name:
+                return name
+        except OSError:
+            pass
+    return socket.gethostname()
 
 
 def lan_ips():
@@ -588,6 +723,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="log events instead of acting")
     ap.add_argument("--token", help="override the saved pairing key")
     ap.add_argument("--no-browser", action="store_true", help="don't open the QR page")
+    ap.add_argument("--tunnel", action="store_true",
+                    help="expose over a Cloudflare quick tunnel (for Wi-Fi that isolates clients)")
     args = ap.parse_args()
     server = Server(args)
     try:
@@ -596,6 +733,8 @@ def main():
         pass
     finally:
         server.laser.close()
+        if server.tunnel:
+            server.tunnel.close()
 
 
 if __name__ == "__main__":

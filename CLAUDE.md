@@ -5,29 +5,29 @@ Phone-as-trackpad and presentation remote for macOS. Functional equivalent of Mo
 copy are original and must stay that way.
 
 Owner: Sota. Phone: **Android** (Chrome). Laptop: Mac. Main venue: UC Berkeley, where campus
-Wi-Fi likely blocks phone→laptop traffic (inferred, not verified).
+Wi-Fi blocks phone→laptop traffic (verified 2026-10-07: run with `--tunnel` there).
 
-## Status at handoff
+## Status (verified on Sota's Mac, 2026-10-07)
 
 | Part | Status |
 |---|---|
-| WebSocket protocol, pairing, HTTP serving | tested (`tests/test_protocol.py`, 10 tests, dry-run) |
+| WebSocket protocol, pairing, HTTP serving | tested (`tests/test_protocol.py`, 12 tests, dry-run) |
 | Phone gestures → events | tested (`tests/test_ui.py`, 9 tests, Chromium mobile viewport + CDP touch events) |
-| **CoreGraphics ctypes calls** (`MacBackend`) | **untested** — written on Linux, never run on macOS |
-| **`laser.swift`** overlay | **untested** — never compiled |
-| osascript volume, `shortcuts run` focus toggle, Accessibility check | **untested** |
-| Tunnel (cloudflared quick tunnel) | **untested** — manual; see backlog #2 |
-| Real Android phone over Wi-Fi | **untested** |
-
-**First job on the Mac:** run `python3 lectern.py`, pair the Android phone, and walk the
-manual checklist below. Fix whatever breaks before adding features.
+| CoreGraphics ctypes calls (`MacBackend`) | verified: bounds, position, pointer move, scroll post correctly on Apple Silicon |
+| `laser.swift` overlay | verified: compiles with Xcode swiftc, window lands centred on the requested point at screen-saver level, hides on command |
+| osascript volume, Accessibility check | verified |
+| `shortcuts run` focus toggle | not verified: no "Lectern Focus" Shortcut exists yet, so the instruction toast path runs |
+| `--tunnel` (cloudflared quick tunnel) | verified end to end from campus Wi-Fi; WebSocket ping RTT 50-70 ms |
+| Real Android phone over campus Wi-Fi | **blocked by the network**: UC Berkeley Wi-Fi isolates clients, confirmed. Use `--tunnel` there. |
+| Real Android phone over the tunnel | connects; gesture checklist (items 2-10) still to be walked through |
 
 ## Run and test
 
 ```
 python3 lectern.py                 # real mode (macOS); opens pairing page with QR
+python3 lectern.py --tunnel        # also opens a Cloudflare quick tunnel; needed on campus Wi-Fi
 python3 lectern.py --dry-run       # logs "[dry-run] ..." instead of posting events; any OS
-python3 -m unittest discover -s tests -v   # 19 tests, ~15 s; UI tests skip without Playwright
+python3 -m unittest discover -s tests -v   # 21 tests, ~15 s; UI tests skip without Playwright
 pip install playwright && python3 -m playwright install chromium   # for tests/test_ui.py
 ```
 
@@ -100,13 +100,14 @@ Details that are easy to break:
 
 ## Backlog (in priority order)
 
-1. **Verify on macOS** (checklist above) and fix the untested parts.
-2. **`--tunnel` flag**: start `cloudflared tunnel --url http://localhost:PORT` as a child
-   process, parse the `https://*.trycloudflare.com` URL from its output, put it first in
-   `urls()` so the QR uses it. Download the binary if missing:
-   `https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-{arm64,amd64}.tgz`
-   (both assets confirmed to exist on 2026-10-07). Measure added latency with the in-app ms readout.
-   Costs: quick-tunnel URL changes every run, so the home-screen shortcut lasts one session.
+1. **Walk the gesture checklist** (items 2-10 above) with the Android phone over `--tunnel`.
+2. **Tunnel hardening.** `--tunnel` works (class `Tunnel` in lectern.py). Known rough edges:
+   the readiness poll can cache an NXDOMAIN in the Mac's resolver while the edge is still
+   propagating (the phone is unaffected); quick-tunnel URL changes every run, so the
+   home-screen shortcut lasts one session; `Server._tunnel_failed` policy is a TODO(human).
+   Gotcha found the hard way: cloudflared silently loads `~/.cloudflared/config.yml` (Sota has
+   one from another project with a catch-all `http_status:404`), which overrides `--url` and
+   makes every quick tunnel 404. Lectern therefore passes its own `--config` with just `url:`.
 3. **Android Bluetooth HID app** (alternative to Wi-Fi/tunnel): Android 9+ `BluetoothHidDevice`
    makes the phone a Bluetooth mouse+keyboard; no Mac software, works on any network. Loses
    laser overlay and volume readout (consumer-control volume keys still possible). Needs

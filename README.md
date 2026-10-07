@@ -32,7 +32,7 @@ Present tab: Back / Next (arrow keys), laser (hold and drag), Blank (`B`, works 
 ## Limits
 
 - **Direct connection by default.** Networks with client isolation (many campus and hotel networks) block phone → Mac traffic. Two ways around it:
-  - Tunnel (works on any network, adds internet round-trip delay): `brew install cloudflared`, then in a second terminal `cloudflared tunnel --url http://localhost:8765`, paste the printed `https://….trycloudflare.com` address into the pairing page, scan the new QR. The address changes every run, so the Home Screen shortcut only lasts one session.
+  - Tunnel (works on any network, adds internet round-trip delay): `python3 lectern.py --tunnel`. It uses `cloudflared` from Homebrew if present, otherwise downloads it once into `~/.config/lectern/`. The QR then carries an `https://….trycloudflare.com` address that changes every run, so the Home Screen shortcut only lasts one session.
   - Phone hotspot: join the Mac to your phone's hotspot; the default QR then works.
 - Bluetooth is not possible from a web page.
 - **Laser** is drawn by `laser.swift`, compiled once with `swiftc` (ships with Xcode Command Line Tools). Without `swiftc`, the laser moves the cursor instead.
@@ -42,4 +42,4 @@ Present tab: Back / Next (arrow keys), laser (hold and drag), Blank (`B`, works 
 
 ## Options
 
-`--port 8765` · `--dry-run` (log instead of acting) · `--no-browser` · `--token <key>`
+`--tunnel` (public HTTPS address via Cloudflare) · `--port 8765` · `--dry-run` (log instead of acting) · `--no-browser` · `--token <key>`
