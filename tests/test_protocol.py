@@ -169,8 +169,12 @@ class ProtocolTest(unittest.TestCase):
                                      {"t": "key", "k": "right"}, {"t": "key", "k": "b"}])
         ws.close()
         ev = self.events_after(mark)
-        for want in ("button right down 1", "scroll 0 -12", "key 124 0", "key 11 0"):
+        for want in ("button right down 1", "key 124 0", "key 11 0"):
             self.assertIn(want, ev)
+        # The pacer may split one scroll message into several steps; the total is exact.
+        scrolls = [e.split() for e in ev if e.startswith("scroll")]
+        self.assertEqual(sum(int(s[2]) for s in scrolls), -12)
+        self.assertTrue(all(int(s[2]) < 0 for s in scrolls), scrolls)
 
     def test_volume_and_focus_reply(self):
         ws, _ = self.run_session([])
@@ -236,7 +240,49 @@ class TunnelTest(unittest.TestCase):
     def test_tunnel_url_comes_first_in_pairing_urls(self):
         import argparse
         a = argparse.Namespace(port=1, token="K", dry_run=True, host="0.0.0.0",
-                               no_browser=True, tunnel=True)
+                               no_browser=True, tunnel=True, no_smooth=False)
         s = self.lectern.Server(a)
         s.tunnel.url = "https://a-b-c-d.trycloudflare.com"
         self.assertEqual(s.urls()[0], "https://a-b-c-d.trycloudflare.com/?k=K")
+
+
+class PacerTest(unittest.TestCase):
+    """The smoother must emit exactly what it was given, in order, and flush before clicks."""
+
+    def setUp(self):
+        sys.path.insert(0, ROOT)
+        import lectern
+        self.lectern = lectern
+
+    def _collect(self, integer, adds):
+        import asyncio
+        out = []
+
+        async def go():
+            p = self.lectern.Pacer(lambda dx, dy: out.append((dx, dy)), integer=integer)
+            for dx, dy in adds:
+                p.add(dx, dy)
+            await asyncio.sleep(0.25)
+            self.assertEqual((p.x, p.y), (0.0, 0.0))
+        asyncio.run(go())
+        return out
+
+    def test_float_total_is_exact_and_split(self):
+        out = self._collect(False, [(10.0, -4.0), (10.0, -4.0), (10.0, -4.0)])
+        self.assertGreater(len(out), 1)
+        self.assertAlmostEqual(sum(d[0] for d in out), 30.0)
+        self.assertAlmostEqual(sum(d[1] for d in out), -12.0)
+
+    def test_integer_steps_sum_exactly(self):
+        out = self._collect(True, [(0, -12), (0, -12)])
+        self.assertTrue(all(d[1] == int(d[1]) for d in out))
+        self.assertEqual(sum(d[1] for d in out), -24)
+        self.assertTrue(all(d[1] < 0 for d in out), out)
+
+    def test_flush_emits_pending_synchronously(self):
+        out = []
+        p = self.lectern.Pacer(lambda dx, dy: out.append((dx, dy)))
+        p.x, p.y = 3.0, 4.0
+        p.flush()
+        self.assertEqual(out, [(3.0, 4.0)])
+        self.assertEqual((p.x, p.y), (0.0, 0.0))

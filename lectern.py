@@ -332,13 +332,79 @@ class Tunnel:
         self.url = None
 
 
+# --------------------------------------------------------------------------- pacing
+class Pacer:
+    """Turns bursty deltas into steady ~120 Hz steps.
+
+    Over a tunnel, messages that left the phone 16 ms apart arrive bunched; posting each one on
+    arrival makes the pointer freeze and jump. Pending motion is drained a fraction per tick
+    instead, which hides jitter at the cost of about one frame of lag. The running total is
+    exact: every delta added is eventually emitted, so clicks land where the finger stopped.
+    """
+
+    HZ = 120
+
+    def __init__(self, emit, integer=False, alpha=0.5):
+        self.emit = emit              # emit(dx, dy)
+        self.integer = integer        # scroll wheels take whole pixels
+        self.alpha = alpha            # fraction of the backlog released per tick
+        self.x = self.y = 0.0
+        self.task = None
+
+    def add(self, dx, dy):
+        self.x += dx
+        self.y += dy
+        if self.task is None or self.task.done():
+            self.task = asyncio.ensure_future(self._run())
+
+    def flush(self):
+        """Emit everything pending now (before a click, so order is preserved)."""
+        if self.x or self.y:
+            x, y = self.x, self.y
+            self.x = self.y = 0.0
+            self.emit(x, y)
+
+    def drop(self):
+        self.x = self.y = 0.0
+
+    def _step(self):
+        """How much of the backlog to release this tick."""
+        # alpha=0.5 drains a burst in ~4 ticks (33 ms); Sota found it fine over the tunnel.
+        # If tuning: keep the invariant that the last step empties the backlog exactly, or the
+        # pointer settles short of where the finger stopped.
+        dx, dy = self.x * self.alpha, self.y * self.alpha
+        if self.integer:
+            dx, dy = float(int(dx)), float(int(dy))
+            if (dx == 0 and dy == 0) or max(abs(self.x), abs(self.y)) < 2:
+                dx, dy = self.x, self.y
+        elif max(abs(self.x), abs(self.y)) < 1:
+            dx, dy = self.x, self.y
+        return dx, dy
+
+    async def _run(self):
+        while self.x or self.y:
+            dx, dy = self._step()
+            self.x -= dx
+            self.y -= dy
+            if abs(self.x) < 1e-9:
+                self.x = 0.0
+            if abs(self.y) < 1e-9:
+                self.y = 0.0
+            self.emit(dx, dy)
+            await asyncio.sleep(1 / self.HZ)
+
+
 # --------------------------------------------------------------------------- controller
 class Controller:
-    def __init__(self, backend, laser):
+    def __init__(self, backend, laser, smooth=True):
         self.b = backend
         self.laser = laser
         self.held = None          # "left" / "right" while a button is held
         self.last_click = (0.0, 0.0, 0.0, 0)  # time, x, y, count
+        self.smooth = smooth
+        self.pace_move = Pacer(self._move_now)
+        self.pace_scroll = Pacer(lambda dx, dy: self.b.scroll(int(dx), int(dy)), integer=True)
+        self.pace_laser = Pacer(self.laser.move)
 
     def _clicks(self):
         """macOS only treats a click as a double-click if clickState says so."""
@@ -349,19 +415,43 @@ class Controller:
         self.last_click = (t, x, y, n)
         return n
 
-    def move(self, dx, dy):
+    def _move_now(self, dx, dy):
         x, y = self.b.position()
         x0, y0, x1, y1 = self.b.bounds()
         nx = min(max(x + dx, x0), x1 - 1)
         ny = min(max(y + dy, y0), y1 - 1)
         self.b.move_to(nx, ny, self.held)
 
+    def move(self, dx, dy):
+        if self.smooth:
+            self.pace_move.add(dx, dy)
+        else:
+            self._move_now(dx, dy)
+
+    def scroll(self, dx, dy):
+        if self.smooth:
+            self.pace_scroll.add(dx, dy)
+        else:
+            self.b.scroll(int(dx), int(dy))
+
+    def laser_move(self, dx, dy):
+        if self.smooth:
+            self.pace_laser.add(dx, dy)
+        else:
+            self.laser.move(dx, dy)
+
+    def laser_hide(self):
+        self.pace_laser.drop()
+        self.laser.hide()
+
     def click(self, which):
+        self.pace_move.flush()
         n = self._clicks() if which == "left" else 1
         self.b.button(which, True, n)
         self.b.button(which, False, n)
 
     def press(self, which, down):
+        self.pace_move.flush()
         if down:
             if self.held:
                 return
@@ -375,9 +465,11 @@ class Controller:
             self.held = None
 
     def release_all(self):
+        self.pace_move.flush()
+        self.pace_scroll.flush()
         if self.held:
             self.press(self.held, False)
-        self.laser.hide()
+        self.laser_hide()
 
 
 async def osa(script):
@@ -466,7 +558,7 @@ class Server:
         self.dry = args.dry_run or sys.platform != "darwin"
         self.backend = DryRunBackend() if self.dry else MacBackend()
         self.laser = Laser(self.backend, self.dry)
-        self.ctl = Controller(self.backend, self.laser)
+        self.ctl = Controller(self.backend, self.laser, smooth=not args.no_smooth)
         self.token = self._load_token()
         self.clients = set()
         self.tunnel = Tunnel(args.port) if args.tunnel else None
@@ -614,16 +706,16 @@ class Server:
         elif t == "btn":
             c.press("right" if m.get("b") == "right" else "left", bool(m.get("down")))
         elif t == "s":
-            c.b.scroll(round(float(m.get("dx", 0))), round(float(m.get("dy", 0))))
+            c.scroll(round(float(m.get("dx", 0))), round(float(m.get("dy", 0))))
         elif t == "key":
             code = KEY.get(m.get("k"))
             if code is not None:
                 c.b.key(code)
         elif t == "laser":
             if m.get("on") is False:
-                self.laser.hide()
+                c.laser_hide()
             else:
-                self.laser.move(float(m.get("dx", 0)), float(m.get("dy", 0)))
+                c.laser_move(float(m.get("dx", 0)), float(m.get("dy", 0)))
         elif t == "vol":
             return await volume(m.get("a", "get"), self.dry)
         elif t == "focus":
@@ -652,12 +744,11 @@ class Server:
         return out
 
     def _tunnel_failed(self):
-        """Called when --tunnel was requested but no public URL came up within the timeout."""
-        # TODO(human): decide the policy. Options: (a) keep running on LAN only and print a
-        # warning with the likely causes (no internet, GitHub download blocked, cloudflared
-        # crashed); (b) retry once; (c) exit non-zero so start.command's window shows the
-        # failure. Whatever you choose, remember Sota's venue usually has no working LAN path.
-        print("  tunnel: no public URL; continuing with LAN addresses only.", flush=True)
+        """--tunnel was requested but no public URL came up: say so loudly, keep LAN."""
+        print("\n  ! tunnel: no public URL after 40 s. The LAN addresses below only work on"
+              "\n    networks that let phones talk to laptops (not campus Wi-Fi). Likely causes:"
+              "\n    no internet yet, github.com blocked (cloudflared download), or cloudflared"
+              "\n    crashed. Fix and restart Lectern.\n", flush=True)
 
     async def run(self):
         srv = await asyncio.start_server(self.handle, self.args.host, self.args.port)
@@ -723,6 +814,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="log events instead of acting")
     ap.add_argument("--token", help="override the saved pairing key")
     ap.add_argument("--no-browser", action="store_true", help="don't open the QR page")
+    ap.add_argument("--no-smooth", action="store_true",
+                    help="post each phone message as it arrives (no jitter smoothing)")
     ap.add_argument("--tunnel", action="store_true",
                     help="expose over a Cloudflare quick tunnel (for Wi-Fi that isolates clients)")
     args = ap.parse_args()

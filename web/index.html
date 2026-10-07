@@ -165,7 +165,7 @@
   <div class="sheet" id="sheet">
     <h3>Settings</h3>
     <div class="field"><label>Pointer speed</label><input type="range" id="sPtr" min="0.5" max="4" step="0.1"><span class="val" id="vPtr"></span></div>
-    <div class="field"><label>Scroll speed</label><input type="range" id="sScr" min="0.5" max="4" step="0.1"><span class="val" id="vScr"></span></div>
+    <div class="field"><label>Scroll speed</label><input type="range" id="sScr" min="0.3" max="4" step="0.1"><span class="val" id="vScr"></span></div>
     <div class="field"><label>Laser speed</label><input type="range" id="sLas" min="1" max="6" step="0.1"><span class="val" id="vLas"></span></div>
     <div class="field"><label>Natural scrolling</label><input type="checkbox" id="sNat"></div>
     <p class="help">Add this page to your Home Screen (Share → Add to Home Screen) to keep the pairing and open it full-screen.<br>Silence runs a Shortcut named “Lectern Focus” on the Mac.</p>
@@ -184,10 +184,14 @@
   const $ = (s) => document.querySelector(s);
 
   // ---------- settings
-  const defaults = { ptr: 1.6, scr: 1.6, las: 2.6, nat: true };
+  // v: bump when a default changes, so phones that saved the old defaults pick up the new one.
+  const defaults = { ptr: 1.6, scr: 1.0, las: 2.6, nat: true, v: 2 };
   let S;
-  try { S = Object.assign({}, defaults, JSON.parse(localStorage.getItem("lectern.s") || "{}")); }
-  catch (e) { S = Object.assign({}, defaults); }
+  try {
+    const saved = JSON.parse(localStorage.getItem("lectern.s") || "{}");
+    if (saved.v !== defaults.v) { delete saved.scr; saved.v = defaults.v; }
+    S = Object.assign({}, defaults, saved);
+  } catch (e) { S = Object.assign({}, defaults); }
   const save = () => { try { localStorage.setItem("lectern.s", JSON.stringify(S)); } catch (e) {} };
   [["sPtr","vPtr","ptr"],["sScr","vScr","scr"],["sLas","vLas","las"]].forEach(([i,v,k]) => {
     const el = $("#"+i); el.value = S[k]; $("#"+v).textContent = (+S[k]).toFixed(1);
@@ -352,12 +356,15 @@
     } else if ((G.mode === "two" || G.mode === "lift") && !G.moved && now - G.t0 < 320) {
       send({ t: "click", b: "right" });
     } else if ((G.mode === "two" || G.mode === "lift") && G.moved && now - G.lt < 60) {
-      let vx = G.vx, vy = G.vy, last = now;
+      // Momentum: integrate every frame but send at most ~20 messages/s (the Mac paces them
+      // into smooth steps), and stop sooner; a flick used to cost ~40 tiny messages.
+      let vx = G.vx, vy = G.vy, last = now, sinceSend = 0;
       const step = (t) => {
-        const dt = t - last; last = t;
+        const dt = t - last; last = t; sinceSend += dt;
         vx *= Math.pow(0.94, dt / 16); vy *= Math.pow(0.94, dt / 16);
-        if (Math.hypot(vx, vy) < 0.05) { momentum = null; return; }
-        acc.sx += vx * dt; acc.sy += vy * dt; queue();
+        acc.sx += vx * dt; acc.sy += vy * dt;
+        if (Math.hypot(vx, vy) < 0.08) { momentum = null; queue(); return; }
+        if (sinceSend >= 48 || Math.hypot(acc.sx, acc.sy) >= 40) { sinceSend = 0; queue(); }
         momentum = requestAnimationFrame(step);
       };
       if (Math.hypot(vx, vy) > 0.25) momentum = requestAnimationFrame(step);

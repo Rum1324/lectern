@@ -11,7 +11,7 @@ Wi-Fi blocks phone→laptop traffic (verified 2026-10-07: run with `--tunnel` th
 
 | Part | Status |
 |---|---|
-| WebSocket protocol, pairing, HTTP serving | tested (`tests/test_protocol.py`, 12 tests, dry-run) |
+| WebSocket protocol, pairing, HTTP serving | tested (`tests/test_protocol.py`, 15 tests, dry-run) |
 | Phone gestures → events | tested (`tests/test_ui.py`, 9 tests, Chromium mobile viewport + CDP touch events) |
 | CoreGraphics ctypes calls (`MacBackend`) | verified: bounds, position, pointer move, scroll post correctly on Apple Silicon |
 | `laser.swift` overlay | verified: compiles with Xcode swiftc, window lands centred on the requested point at screen-saver level, hides on command |
@@ -26,8 +26,9 @@ Wi-Fi blocks phone→laptop traffic (verified 2026-10-07: run with `--tunnel` th
 ```
 python3 lectern.py                 # real mode (macOS); opens pairing page with QR
 python3 lectern.py --tunnel        # also opens a Cloudflare quick tunnel; needed on campus Wi-Fi
+python3 lectern.py --no-smooth     # post events on arrival (compare against the Pacer)
 python3 lectern.py --dry-run       # logs "[dry-run] ..." instead of posting events; any OS
-python3 -m unittest discover -s tests -v   # 21 tests, ~15 s; UI tests skip without Playwright
+python3 -m unittest discover -s tests -v   # 24 tests, ~15 s; UI tests skip without Playwright
 pip install playwright && python3 -m playwright install chromium   # for tests/test_ui.py
 ```
 
@@ -79,6 +80,12 @@ Details that are easy to break:
   converts to Cocoa (origin bottom-left) using the main screen height.
 - Natural scrolling: fingers move up → `dy < 0` → wheel1 negative → content scrolls down.
 - Phone batches move/scroll/laser to one message per animation frame (`flush()`).
+- **Jitter smoothing (`Pacer`)**: the Mac does not post each message on arrival. Move, scroll
+  and laser deltas go into a per-stream backlog that a 120 Hz asyncio task drains a fraction
+  per tick (`Pacer._step`, alpha 0.5). Totals are exact; `flush()` runs synchronously before
+  any click/button change so event order is preserved; `--no-smooth` disables it for A/B.
+- Momentum scroll on the phone integrates every frame but sends at most ~20 msgs/s and stops
+  at 0.08 px/ms (was ~40 msgs per flick).
 - Gestures use `targetTouches`, so holding the Left button while moving on the pad works.
 - Disconnect releases any held button (`Controller.release_all`).
 - Phone keep-awake: Wake Lock needs HTTPS, so over plain LAN HTTP a 1.5 kB muted looping
@@ -87,7 +94,7 @@ Details that are easy to break:
 ## Manual checklist on the Mac (real mode)
 
 1. Accessibility prompt appears if not granted; after granting + restart, `hello.trusted` is true (no yellow banner on phone).
-2. Pointer moves smoothly; speed feels right at default (Settings slider 1.6).
+2. Pointer moves smoothly; speed feels right at default (Settings sliders: pointer 1.6, scroll 1.0).
 3. Tap = click, tap-tap = double-click (opens a Finder item), two-finger tap = context menu.
 4. Two-finger scroll in Safari/Chrome, momentum stops naturally.
 5. Double-tap-hold drags a Finder window; holding Left + moving also drags.
@@ -104,7 +111,7 @@ Details that are easy to break:
 2. **Tunnel hardening.** `--tunnel` works (class `Tunnel` in lectern.py). Known rough edges:
    the readiness poll can cache an NXDOMAIN in the Mac's resolver while the edge is still
    propagating (the phone is unaffected); quick-tunnel URL changes every run, so the
-   home-screen shortcut lasts one session; `Server._tunnel_failed` policy is a TODO(human).
+   home-screen shortcut lasts one session; `Server._tunnel_failed` warns loudly and continues on LAN.
    Gotcha found the hard way: cloudflared silently loads `~/.cloudflared/config.yml` (Sota has
    one from another project with a catch-all `http_status:404`), which overrides `--url` and
    makes every quick tunnel 404. Lectern therefore passes its own `--config` with just `url:`.
@@ -112,7 +119,7 @@ Details that are easy to break:
    makes the phone a Bluetooth mouse+keyboard; no Mac software, works on any network. Loses
    laser overlay and volume readout (consumer-control volume keys still possible). Needs
    Android Studio/Kotlin. Decide with Sota before starting.
-4. Momentum scroll sends ~40 tiny messages after lift; coalesce or cap.
+4. Pacer alpha 0.5 felt right to Sota over the tunnel; revisit only if the network changes.
 5. WebSocket server ignores fragmented frames (fine for this client; harden if reused).
 6. Laser on multi-display setups: verify the Cocoa y-conversion on a secondary display.
 
