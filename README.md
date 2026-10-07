@@ -16,6 +16,10 @@ python3 lectern.py
 3. If macOS asks whether python3 may accept incoming connections, allow it.
 4. On the phone: Share → **Add to Home Screen**. The pairing key is in that link and is saved on the Mac in `~/.config/lectern/token`, so you pair once.
 
+## Install as an app (Android Chrome)
+
+Over a fixed HTTPS address (see the tunnel setup under Limits), Chrome offers to install the page: open the QR link once, then menu ⋮ → **Install app** (or **Add to Home screen**). The pairing key is kept on the phone, so the installed app opens straight to the trackpad. Over plain LAN http, "Add to Home screen" still works but is a bookmark, not an install.
+
 ## Gestures
 
 | Trackpad tab | Mac action |
@@ -32,7 +36,7 @@ Present tab: Back / Next (arrow keys), laser (hold and drag), Blank (`B`, works 
 ## Limits
 
 - **Direct connection by default.** Networks with client isolation (many campus and hotel networks) block phone → Mac traffic. Two ways around it:
-  - Tunnel (works on any network, adds internet round-trip delay): `python3 lectern.py --tunnel`. It uses `cloudflared` from Homebrew if present, otherwise downloads it once into `~/.config/lectern/`. The QR then carries an `https://….trycloudflare.com` address that changes every run, so the Home Screen shortcut only lasts one session.
+  - Tunnel (works on any network, adds internet round-trip delay): `python3 lectern.py --tunnel`. It uses `cloudflared` from Homebrew if present, otherwise downloads it once into `~/.config/lectern/`. Without setup the QR carries an `https://….trycloudflare.com` address that changes every run. With a domain on Cloudflare, run once `cloudflared tunnel login` and `python3 lectern.py --tunnel-setup lectern.yourdomain.com`; the address is then fixed and the phone can install the page as an app.
   - Phone hotspot: join the Mac to your phone's hotspot; the default QR then works.
 - Bluetooth is not possible from a web page.
 - **Laser** is drawn by `laser.swift`, compiled once with `swiftc` (ships with Xcode Command Line Tools). Without `swiftc`, the laser moves the cursor instead.
@@ -42,4 +46,4 @@ Present tab: Back / Next (arrow keys), laser (hold and drag), Blank (`B`, works 
 
 ## Options
 
-`--tunnel` (public HTTPS address via Cloudflare) · `--port 8765` · `--dry-run` (log instead of acting) · `--no-browser` · `--token <key>`
+`--tunnel` (public HTTPS address via Cloudflare) · `--tunnel-setup <hostname>` (one-time, fixed address) · `--port 8765` · `--dry-run` (log instead of acting) · `--no-browser` · `--token <key>`

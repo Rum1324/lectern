@@ -32,6 +32,10 @@ WEB = os.path.join(HERE, "web")
 CONF_DIR = os.path.expanduser("~/.config/lectern")
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
+# mimetypes doesn't know .webmanifest, and .js must be text/javascript for the service worker
+STATIC_TYPES = {".webmanifest": "application/manifest+json", ".js": "text/javascript",
+                ".html": "text/html; charset=utf-8"}
+
 # macOS virtual key codes
 KEY = {"right": 124, "left": 123, "down": 125, "up": 126, "b": 11, "esc": 53, "space": 49}
 
@@ -243,18 +247,76 @@ def parse_tunnel_url(text):
     return m.group(0) if m else None
 
 
+NAMED_TUNNEL_CFG = os.path.join(CONF_DIR, "tunnel.yml")
+NAMED_TUNNEL = "lectern"
+
+
+def read_named_tunnel(path=NAMED_TUNNEL_CFG):
+    """(tunnel name, hostname, credentials file) from the yml written by --tunnel-setup."""
+    try:
+        with open(path) as f:
+            text = f.read()
+    except OSError:
+        return None
+    name = re.search(r"^tunnel:\s*(\S+)", text, re.M)
+    host = re.search(r"^\s*-?\s*hostname:\s*(\S+)", text, re.M)
+    cred = re.search(r"^credentials-file:\s*(\S+)", text, re.M)
+    return (name.group(1), host.group(1), cred.group(1)) if name and host and cred else None
+
+
+def write_named_tunnel(name, hostname, cred, port, path=NAMED_TUNNEL_CFG):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write("# Written by `lectern.py --tunnel-setup`. Delete to go back to quick tunnels.\n"
+                "tunnel: %s\ncredentials-file: %s\ningress:\n"
+                "  - hostname: %s\n    service: http://localhost:%d\n"
+                "  - service: http_status:404\n" % (name, cred, hostname, port))
+
+
 class Tunnel:
-    """Cloudflare quick tunnel: a public HTTPS URL that reaches this Mac from any network.
+    """Cloudflare tunnel: a public HTTPS URL that reaches this Mac from any network.
 
     Needed where the Wi-Fi isolates clients (campus networks), so the phone can't reach the
-    laptop directly. The URL changes every run; the phone's home-screen bookmark lasts one
-    session. Adds internet round-trip latency; the phone shows it next to the host name.
+    laptop directly. Two modes:
+    - named (after `--tunnel-setup <hostname>`): fixed https://<hostname>, so the phone can
+      install the page as an app once and keep it.
+    - quick (fallback): a random *.trycloudflare.com URL that changes every run.
+    Adds internet round-trip latency; the phone shows it next to the host name.
     """
 
     def __init__(self, port):
         self.port = port
         self.proc = None
         self.url = None
+        self.named = read_named_tunnel()
+
+    def setup(self, hostname):
+        """One-time: create the named tunnel, route DNS, write the config. Needs a
+        Cloudflare login (`cloudflared tunnel login`) for a zone that owns `hostname`."""
+        # Every subcommand loads ~/.cloudflared/config.yml, and a `tunnel:` key there makes
+        # cloudflared act on *that* tunnel whatever name we pass (route dns included), so
+        # run them all with a config of our own that has no tunnel key.
+        os.makedirs(CONF_DIR, exist_ok=True)
+        plain = os.path.join(CONF_DIR, "cloudflared.yml")
+        with open(plain, "w") as f:
+            f.write("no-autoupdate: true\n")
+        cf = [self.binary(), "--config", plain, "tunnel"]
+        r = subprocess.run(cf + ["create", NAMED_TUNNEL], capture_output=True, text=True)
+        if r.returncode != 0 and "already exists" not in r.stderr + r.stdout:
+            raise RuntimeError((r.stderr or r.stdout).strip())
+        lst = subprocess.run(cf + ["list", "-o", "json", "-n", NAMED_TUNNEL],
+                             capture_output=True, text=True)
+        ids = [t["id"] for t in json.loads(lst.stdout or "[]") if t.get("name") == NAMED_TUNNEL]
+        if not ids:
+            raise RuntimeError("tunnel '%s' not found after create" % NAMED_TUNNEL)
+        r = subprocess.run(cf + ["route", "dns", "-f", NAMED_TUNNEL, hostname],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            raise RuntimeError((r.stderr or r.stdout).strip())
+        cred = os.path.expanduser("~/.cloudflared/%s.json" % ids[0])
+        write_named_tunnel(NAMED_TUNNEL, hostname, cred, self.port)
+        self.named = (NAMED_TUNNEL, hostname, cred)
+        return "https://" + hostname
 
     def binary(self):
         found = shutil.which("cloudflared")
@@ -281,17 +343,27 @@ class Tunnel:
         except Exception as e:  # download failed, no network, etc.
             print("  tunnel: cloudflared unavailable:", e, flush=True)
             return None
-        # cloudflared silently loads ~/.cloudflared/config.yml if one exists. A named-tunnel
-        # config there (with its own ingress rules and a catch-all 404) would override --url
-        # and every request through the quick tunnel would 404, so give it our own config.
-        os.makedirs(CONF_DIR, exist_ok=True)
-        cfg = os.path.join(CONF_DIR, "cloudflared.yml")
-        with open(cfg, "w") as f:
-            f.write("url: http://localhost:%d\n" % self.port)
-        self.proc = await asyncio.create_subprocess_exec(
-            binary, "tunnel", "--config", cfg, "--no-autoupdate",
-            "--url", "http://localhost:%d" % self.port,
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+        if self.named:
+            name, hostname, cred = self.named
+            # Ingress rules in the config win over --url, so rewrite them for this run's port.
+            write_named_tunnel(name, hostname, cred, self.port)
+            self.proc = await asyncio.create_subprocess_exec(
+                binary, "tunnel", "--config", NAMED_TUNNEL_CFG, "--no-autoupdate", "run", name,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+            want = lambda s: "https://" + hostname if "Registered tunnel connection" in s else None
+        else:
+            # cloudflared silently loads ~/.cloudflared/config.yml if one exists. A named-tunnel
+            # config there (with its own ingress rules and a catch-all 404) would override
+            # --url and every request through the quick tunnel would 404, so give it our own.
+            os.makedirs(CONF_DIR, exist_ok=True)
+            cfg = os.path.join(CONF_DIR, "cloudflared.yml")
+            with open(cfg, "w") as f:
+                f.write("url: http://localhost:%d\n" % self.port)
+            self.proc = await asyncio.create_subprocess_exec(
+                binary, "tunnel", "--config", cfg, "--no-autoupdate",
+                "--url", "http://localhost:%d" % self.port,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+            want = parse_tunnel_url
         deadline = time.monotonic() + timeout
         while self.url is None and time.monotonic() < deadline:
             try:
@@ -301,7 +373,7 @@ class Tunnel:
                 break
             if not line:
                 break
-            self.url = parse_tunnel_url(line.decode("utf-8", "replace"))
+            self.url = want(line.decode("utf-8", "replace"))
         if self.url is None:
             self.close()
             return None
@@ -635,7 +707,8 @@ class Server:
             return
         with open(fp, "rb") as f:
             body = f.read()
-        ctype = mimetypes.guess_type(fp)[0] or "application/octet-stream"
+        ctype = STATIC_TYPES.get(os.path.splitext(fp)[1]) or \
+            mimetypes.guess_type(fp)[0] or "application/octet-stream"
         await self._respond(writer, 200, body, ctype)
 
     async def _respond(self, writer, code, body, ctype):
@@ -817,8 +890,19 @@ def main():
     ap.add_argument("--no-smooth", action="store_true",
                     help="post each phone message as it arrives (no jitter smoothing)")
     ap.add_argument("--tunnel", action="store_true",
-                    help="expose over a Cloudflare quick tunnel (for Wi-Fi that isolates clients)")
+                    help="expose over a Cloudflare tunnel (for Wi-Fi that isolates clients); "
+                         "named if --tunnel-setup was run, else a quick tunnel")
+    ap.add_argument("--tunnel-setup", metavar="HOSTNAME",
+                    help="one-time: create named tunnel 'lectern' routed to HOSTNAME (needs "
+                         "`cloudflared tunnel login` first), then exit")
     args = ap.parse_args()
+    if args.tunnel_setup:
+        try:
+            url = Tunnel(args.port).setup(args.tunnel_setup)
+        except Exception as e:
+            sys.exit("tunnel setup failed: %s" % e)
+        print("Named tunnel ready. Run `python3 lectern.py --tunnel`; the QR will show", url)
+        return
     server = Server(args)
     try:
         asyncio.run(server.run())
