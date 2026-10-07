@@ -115,6 +115,8 @@ final class LecternApp: NSObject, NSApplicationDelegate {
                 let url = String(line.dropFirst("open on your phone: ".count))
                 let host = URL(string: url)?.host ?? url
                 statusLine.title = "Running · " + host
+            } else if line.hasPrefix("tunnel: downloading cloudflared") {
+                statusLine.title = "Downloading cloudflared (first run)…"
             } else if line.hasPrefix("! macOS has not granted Accessibility") {
                 statusLine.title = "Accessibility needed, then Stop and Start"
                 axItem.isHidden = false

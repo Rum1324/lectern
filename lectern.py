@@ -320,12 +320,13 @@ class Tunnel:
         return "https://" + hostname
 
     def binary(self):
-        found = shutil.which("cloudflared")
-        if found:
-            return found
+        # Lectern.app launched from Finder has a minimal PATH, so look in the Homebrew
+        # locations explicitly before falling back to the downloaded copy.
         local = os.path.join(CONF_DIR, "cloudflared")
-        if os.path.exists(local):
-            return local
+        for cand in (shutil.which("cloudflared"), "/opt/homebrew/bin/cloudflared",
+                     "/usr/local/bin/cloudflared", local):
+            if cand and os.path.exists(cand):
+                return cand
         arch = "arm64" if platform.machine() == "arm64" else "amd64"
         print("  tunnel: downloading cloudflared (%s)..." % arch, flush=True)
         data = urllib.request.urlopen(CLOUDFLARED_DL % arch, timeout=120).read()
