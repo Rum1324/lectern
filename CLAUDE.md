@@ -57,8 +57,10 @@ tests/            protocol + UI tests (see above)
 
 `Lectern.app` runs `/usr/bin/python3 -u lectern.py --no-browser --port 8765 [--tunnel]` from its
 Resources folder, parses the server's stdout for the address and the Accessibility warning,
-logs everything to `~/.config/lectern/app.log`, and SIGTERMs the child on Stop/Quit (which is
-why lectern.py handles SIGTERM). "Use tunnel" is a UserDefaults bool, default on; toggling it
+logs everything to `~/.config/lectern/app.log`, and SIGTERMs the child on Stop/Quit (3 s grace,
+then SIGKILL). lectern.py handles SIGINT/SIGTERM/SIGHUP through `loop.add_signal_handler`
+and closes phone connections before the server: raising SystemExit from a plain signal
+handler made Python 3.12's `wait_closed()` hang until the phone's 30 s idle timeout. "Use tunnel" is a UserDefaults bool, default on; toggling it
 restarts the server. Accessibility must be granted to Lectern.app itself (not Terminal); the
 ad-hoc signature uses a fixed identifier so rebuilds keep the grant. It is not notarized: users
 right-click → Open once. Apple's python3 (3.9) is what runs inside the app, hence the 3.9 rule.

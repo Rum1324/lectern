@@ -51,7 +51,9 @@ final class LecternApp: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if let p = proc, p.isRunning {
             p.terminate()            // SIGTERM: lectern.py stops cloudflared and the laser helper
-            p.waitUntilExit()
+            let deadline = Date().addingTimeInterval(3)
+            while p.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+            if p.isRunning { kill(p.processIdentifier, SIGKILL) }
         }
         return .terminateNow
     }

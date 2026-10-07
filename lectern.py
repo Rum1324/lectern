@@ -400,9 +400,12 @@ class Tunnel:
             return False
 
     def close(self):
-        if self.proc and self.proc.returncode is None:
-            self.proc.terminate()
-        self.url = None
+        proc, self.proc, self.url = self.proc, None, None
+        if proc and proc.returncode is None:
+            try:
+                proc.terminate()
+            except ProcessLookupError:
+                pass
 
 
 # --------------------------------------------------------------------------- pacing
@@ -855,8 +858,22 @@ class Server:
         if not self.args.no_browser and sys.platform == "darwin":
             subprocess.run(["open", "http://127.0.0.1:%d/pair" % self.args.port])
         print("\n  Ctrl+C to stop.\n", flush=True)
-        async with srv:
-            await srv.serve_forever()
+        # Stop on Ctrl+C, kill, or the terminal window closing. Handled by the loop (not by
+        # raising from a signal handler) so shutdown is orderly: close the phone connections
+        # first, or Python 3.12's wait_closed() would wait for them to time out.
+        loop = asyncio.get_running_loop()
+        stop = loop.create_future()
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            loop.add_signal_handler(sig, lambda: stop.done() or stop.set_result(None))
+        try:
+            async with srv:
+                await stop
+                for w in list(self.clients):
+                    w.close()
+        finally:
+            self.laser.close()
+            if self.tunnel:
+                self.tunnel.close()
 
 
 def mac_name():
@@ -917,13 +934,9 @@ def main():
         print("Named tunnel ready. Run `python3 lectern.py --tunnel`; the QR will show", url)
         return
     server = Server(args)
-    # Ctrl+C raises KeyboardInterrupt; SIGTERM/SIGHUP (kill, closing the terminal window) must
-    # also reach the finally below, or the cloudflared child keeps running after Lectern exits.
-    for sig in (signal.SIGTERM, signal.SIGHUP):
-        signal.signal(sig, lambda *_: sys.exit(0))
     try:
         asyncio.run(server.run())
-    except (KeyboardInterrupt, SystemExit):
+    except KeyboardInterrupt:  # only if it lands before the loop installs its handlers
         pass
     finally:
         server.laser.close()
