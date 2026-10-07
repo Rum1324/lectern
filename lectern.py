@@ -19,6 +19,7 @@ import platform
 import re
 import secrets
 import shutil
+import signal
 import socket
 import struct
 import subprocess
@@ -916,9 +917,13 @@ def main():
         print("Named tunnel ready. Run `python3 lectern.py --tunnel`; the QR will show", url)
         return
     server = Server(args)
+    # Ctrl+C raises KeyboardInterrupt; SIGTERM/SIGHUP (kill, closing the terminal window) must
+    # also reach the finally below, or the cloudflared child keeps running after Lectern exits.
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, lambda *_: sys.exit(0))
     try:
         asyncio.run(server.run())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         pass
     finally:
         server.laser.close()
