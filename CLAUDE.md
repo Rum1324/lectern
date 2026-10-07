@@ -19,9 +19,9 @@ Wi-Fi blocks phone→laptop traffic (verified 2026-10-07: run with `--tunnel` th
 | `shortcuts run` focus toggle | not verified: no "Lectern Focus" Shortcut exists yet, so the instruction toast path runs |
 | `--tunnel` (cloudflared quick tunnel) | verified end to end from campus Wi-Fi; WebSocket ping RTT 50-70 ms |
 | `--tunnel` named mode (`https://lectern.<your-domain>`) | verified from the Mac: page, manifest, icons, /pair locked, WebSocket ping RTT 40-50 ms. Set up on Sota's Mac on 2026-10-07 |
-| Installable app (manifest + service worker) | served and registered without errors in headless Chromium; **"Install app" on the real Android phone not yet tried** |
+| Installable app (manifest + service worker) | verified: installed on Sota's Android via Chrome "Install app" at https://lectern.<your-domain> (2026-10-07) |
 | Real Android phone over campus Wi-Fi | **blocked by the network**: UC Berkeley Wi-Fi isolates clients, confirmed. Use `--tunnel` there. |
-| Real Android phone over the tunnel | connects; gesture checklist (items 2-10) still to be walked through |
+| Real Android phone over the tunnel | verified: Sota walked the checklist over the quick tunnel, then the named tunnel; smoothing and scroll default tuned to his feel |
 
 ## Run and test
 
