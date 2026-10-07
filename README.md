@@ -12,7 +12,9 @@ tunnel on (turn it off in the menu for a normal home network), shows the address
 opens the pairing QR, and stops everything when you quit. It needs the Xcode Command Line Tools
 (`xcode-select --install`) for Python and the laser overlay; nothing else.
 
-Or build it yourself with `./build-app.sh` (output in `dist/`).
+Or build it yourself with `./build-app.sh` (output in `dist/`). If you rebuild often, run
+`./make-signing-cert.sh` once first: it creates a free self-signed signing certificate so macOS
+keeps the Accessibility grant across rebuilds.
 
 **Terminal.**
 

@@ -27,7 +27,15 @@ for s in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Lectern.icns"
 
-# Ad-hoc signature with a fixed identifier, so macOS keeps the Accessibility grant across rebuilds.
-codesign --force --sign - --identifier com.lectern.menubar "$APP"
+# Sign with the self-signed "Lectern Dev" certificate if ./make-signing-cert.sh created one:
+# macOS then keeps the Accessibility grant across rebuilds. Otherwise ad-hoc (grant is tied to
+# the exact binary and must be re-done after each rebuild: tccutil reset Accessibility com.lectern.menubar).
+if security find-identity -v -p codesigning | grep -q "Lectern Dev"; then
+  codesign --force --sign "Lectern Dev" --identifier com.lectern.menubar "$APP"
+  echo "signed with Lectern Dev"
+else
+  codesign --force --sign - --identifier com.lectern.menubar "$APP"
+  echo "signed ad-hoc (run ./make-signing-cert.sh for a stable identity)"
+fi
 rm -rf build-tmp
 echo "built $APP"

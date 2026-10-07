@@ -49,7 +49,8 @@ web/sw.js         service worker: caches only the app shell (/, manifest, icons)
 web/icon.png      home-screen icon (original); icon-192/512.png are sips resizes of it
 start.command     double-click launcher (terminal)
 app/              menu bar app: LecternApp.swift (thin launcher for lectern.py) + Info.plist
-build-app.sh      builds dist/Lectern.app (universal, ad-hoc signed) with swiftc/sips/iconutil
+build-app.sh      builds dist/Lectern.app (universal) with swiftc/sips/iconutil
+make-signing-cert.sh  one-time self-signed code-signing identity so rebuilds keep Accessibility
 tests/            protocol + UI tests (see above)
 ```
 
@@ -61,8 +62,11 @@ logs everything to `~/.config/lectern/app.log`, and SIGTERMs the child on Stop/Q
 then SIGKILL). lectern.py handles SIGINT/SIGTERM/SIGHUP through `loop.add_signal_handler`
 and closes phone connections before the server: raising SystemExit from a plain signal
 handler made Python 3.12's `wait_closed()` hang until the phone's 30 s idle timeout. "Use tunnel" is a UserDefaults bool, default on; toggling it
-restarts the server. Accessibility must be granted to Lectern.app itself (not Terminal); the
-ad-hoc signature uses a fixed identifier so rebuilds keep the grant. It is not notarized: users
+restarts the server. Accessibility must be granted to Lectern.app itself (not Terminal). The grant is keyed to the
+code signature: ad-hoc signatures change every build, so `./make-signing-cert.sh` creates a
+self-signed "Lectern Dev" identity that build-app.sh uses when present (Sota's Mac has it).
+A stuck or stale entry in the Accessibility list: `tccutil reset Accessibility
+com.lectern.menubar`, relaunch, grant again. It is not notarized: users
 right-click → Open once. Apple's python3 (3.9) is what runs inside the app, hence the 3.9 rule.
 
 ## Hard constraints (keep these unless Sota says otherwise)
