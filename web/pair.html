@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pair Lectern</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root{--bg:#0E0E10;--surface:#18181C;--line:#2E2E36;--text:#F4F2EE;--muted:#8C8A93;--accent:#FF4F3A}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:24px;padding:32px;max-width:420px;width:calc(100% - 32px);text-align:center}
+  h1{margin:0 0 6px;font-size:22px}
+  p{margin:0;color:var(--muted)}
+  #qr{background:#fff;border-radius:16px;padding:16px;width:max-content;margin:24px auto}
+  .alts{margin-top:18px;text-align:left;font-size:13px;color:var(--muted)}
+  .alts button{display:block;width:100%;text-align:left;margin-top:6px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);
+    background:transparent;color:var(--text);font:12px ui-monospace,Menlo,monospace;cursor:pointer;word-break:break-all}
+  .alts button.sel{border-color:var(--accent)}
+  code{font:12px ui-monospace,Menlo,monospace}
+  #tunnel{display:block;width:100%;margin-top:6px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--text);font:12px ui-monospace,Menlo,monospace;box-sizing:border-box}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Scan with your phone camera</h1>
+  <p>Phone and Mac must be on the same Wi-Fi. Then Share → Add to Home Screen so you only pair once.</p>
+  <div id="qr"></div>
+  <div class="alts" id="alts">If the page doesn't load on the phone, try another address:</div>
+  <div class="alts">On Wi-Fi that blocks phone-to-laptop traffic, run a tunnel to <code>http://localhost:PORT</code> and paste its https address here:
+    <input id="tunnel" placeholder="https://….trycloudflare.com" autocomplete="off" spellcheck="false">
+  </div>
+</div>
+<script>
+fetch("/pair.json").then(r => r.json()).then(({ urls, key }) => {
+  document.querySelector(".alts code").textContent = "http://localhost:" + location.port;
+  const box = document.getElementById("qr"), alts = document.getElementById("alts");
+  const show = (u) => {
+    box.innerHTML = "";
+    new QRCode(box, { text: u, width: 240, height: 240, correctLevel: QRCode.CorrectLevel.M });
+    alts.querySelectorAll("button").forEach(b => b.classList.toggle("sel", b.textContent === u));
+  };
+  urls.forEach(u => { const b = document.createElement("button"); b.textContent = u; b.onclick = () => show(u); alts.appendChild(b); });
+  if (urls.length) show(urls[0]); else alts.textContent = "No network address found. Join Wi-Fi and restart Lectern.";
+  document.getElementById("tunnel").addEventListener("input", (e) => {
+    const m = e.target.value.match(/https:\/\/[^\s/?#]+/);
+    if (m) show(m[0] + "/?k=" + key);
+  });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Lectern">
+<meta name="theme-color" content="#0E0E10">
+<link rel="apple-touch-icon" href="/icon.png">
+<title>Lectern</title>
+<style>
+  :root{
+    --bg:#0E0E10; --surface:#18181C; --surface2:#222228; --line:#2E2E36;
+    --text:#F4F2EE; --muted:#8C8A93; --accent:#FF4F3A; --ok:#3DD68C; --warn:#F5B83D;
+    --r:22px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font:15px/1.35 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+    overflow:hidden;overscroll-behavior:none}
+  body{position:fixed;inset:0;display:flex;flex-direction:column;
+    padding:calc(env(safe-area-inset-top) + 10px) 14px calc(env(safe-area-inset-bottom) + 12px)}
+  button{font:inherit;color:inherit;border:0;background:none;padding:0;cursor:pointer;touch-action:manipulation}
+
+  /* top bar */
+  .top{display:flex;align-items:center;gap:10px;height:40px;flex:none}
+  .status{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none;transition:background .2s}
+  .dot.on{background:var(--ok);box-shadow:0 0 0 4px rgba(61,214,140,.15)}
+  .dot.wait{background:var(--warn)}
+  .host{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lat{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+  .timer{font-variant-numeric:tabular-nums;font-weight:600;font-size:15px;padding:7px 12px;border-radius:999px;background:var(--surface)}
+  .timer.run{color:var(--accent)}
+  .icon-btn{width:38px;height:38px;border-radius:50%;background:var(--surface);display:grid;place-items:center}
+  .icon-btn svg{width:19px;height:19px}
+
+  /* tabs */
+  .tabs{display:grid;grid-template-columns:1fr 1fr;background:var(--surface);border-radius:14px;padding:4px;margin:10px 0 12px;flex:none;position:relative}
+  .tabs button{height:38px;border-radius:10px;font-weight:600;color:var(--muted);position:relative;z-index:1;transition:color .2s}
+  .tabs button.sel{color:var(--text)}
+  .tabs .pill{position:absolute;top:4px;bottom:4px;left:4px;width:calc(50% - 4px);background:var(--surface2);border-radius:10px;transition:transform .25s cubic-bezier(.3,.7,.2,1)}
+  .tabs[data-sel="present"] .pill{transform:translateX(100%)}
+
+  .view{flex:1;display:none;flex-direction:column;gap:10px;min-height:0}
+  .view.sel{display:flex}
+
+  /* trackpad */
+  .pad{flex:1;border-radius:var(--r);background:
+      radial-gradient(circle at 1px 1px, #2A2A31 1px, transparent 1.5px) 0 0/18px 18px, var(--surface);
+    border:1px solid var(--line);touch-action:none;position:relative;overflow:hidden}
+  .pad .hint{position:absolute;left:0;right:0;bottom:16px;text-align:center;color:var(--muted);font-size:12.5px;line-height:1.6;pointer-events:none;transition:opacity .4s}
+  .pad.used .hint{opacity:0}
+  .touchmark{position:absolute;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;
+    background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);pointer-events:none}
+  .pad.dragging{border-color:var(--accent)}
+  .mbtns{display:grid;grid-template-columns:1fr 1fr;gap:10px;height:64px;flex:none}
+  .mbtn{border-radius:18px;background:var(--surface);border:1px solid var(--line);font-weight:600;color:var(--muted);touch-action:none}
+  .mbtn.down,.key.down{background:var(--surface2);color:var(--text);transform:scale(.98)}
+
+  /* present */
+  .nav{display:grid;grid-template-columns:1fr 2.2fr;gap:10px;flex:2;min-height:0}
+  .key{border-radius:var(--r);background:var(--surface);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-weight:600;touch-action:none;transition:transform .08s}
+  .key svg{width:34px;height:34px}
+  .key.next{background:var(--accent);border-color:var(--accent);color:#fff}
+  .key.next.down{background:#E8412D}
+  .key small{font-weight:500;font-size:12px;opacity:.75}
+  .laser{flex:1.4;border-radius:var(--r);border:1px dashed #4A2A27;background:
+      radial-gradient(circle at 50% 50%, rgba(255,79,58,.10), transparent 60%), var(--surface);
+    display:flex;align-items:center;justify-content:center;color:var(--muted);font-weight:500;touch-action:none;position:relative;overflow:hidden;min-height:0}
+  .laser.on{border-style:solid;border-color:var(--accent);color:var(--text)}
+  .laser .ldot{width:12px;height:12px;border-radius:50%;background:var(--accent);box-shadow:0 0 18px 6px rgba(255,79,58,.5);margin-right:10px}
+  .row{display:grid;gap:10px;flex:none}
+  .row.two{grid-template-columns:1fr 1fr;height:58px}
+  .row.vol{grid-template-columns:58px 1fr 58px;height:58px;align-items:stretch}
+  .small{border-radius:18px;background:var(--surface);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600;touch-action:none}
+  .small svg{width:20px;height:20px}
+  .level{border-radius:18px;background:var(--surface);border:1px solid var(--line);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;font-weight:600;font-variant-numeric:tabular-nums}
+  .level .fill{position:absolute;inset:0;width:var(--lv,0%);background:var(--surface2);transition:width .2s}
+  .level span{position:relative;display:flex;align-items:center;gap:8px}
+  .level span svg{width:18px;height:18px}
+  .level.muted{color:var(--muted)}
+
+  /* overlays */
+  .banner{display:none;margin:8px 0 0;padding:10px 12px;border-radius:12px;background:#2A2113;color:#F5D58A;font-size:13px;flex:none}
+  .banner.show{display:block}
+  .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 24px);transform:translate(-50%,20px);opacity:0;
+    background:var(--surface2);border:1px solid var(--line);padding:10px 14px;border-radius:12px;font-size:13px;max-width:88vw;transition:all .25s;pointer-events:none;z-index:20}
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+  .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .2s;z-index:10}
+  .sheet{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-radius:22px 22px 0 0;padding:20px 20px calc(env(safe-area-inset-bottom) + 20px);transform:translateY(100%);transition:transform .25s cubic-bezier(.3,.7,.2,1);z-index:11}
+  .sheet.open{transform:none}.sheet-bg.open{opacity:1;pointer-events:auto}
+  .sheet h3{margin:0 0 14px;font-size:17px}
+  .field{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-top:1px solid var(--line)}
+  .field label{flex:none}
+  .field input[type=range]{flex:1;accent-color:var(--accent)}
+  .field input[type=checkbox]{width:22px;height:22px;accent-color:var(--accent)}
+  .field .val{width:34px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+  .help{color:var(--muted);font-size:12.5px;line-height:1.55;margin:14px 0 0}
+  .gate{position:fixed;inset:0;background:var(--bg);display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px;gap:10px;z-index:30}
+  .gate.show{display:flex}
+  .gate h2{margin:0;font-size:22px}.gate p{margin:0;color:var(--muted);max-width:300px}
+  video{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none}
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="status"><span class="dot" id="dot"></span><span class="host" id="host">Connecting…</span><span class="lat" id="lat"></span></div>
+    <button class="timer" id="timer" aria-label="Talk timer: tap to start or pause, hold to reset">0:00</button>
+    <button class="icon-btn" id="gear" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+    </button>
+  </div>
+  <div class="banner" id="banner"></div>
+
+  <div class="tabs" id="tabs" data-sel="pad">
+    <div class="pill"></div>
+    <button class="sel" data-view="pad">Trackpad</button>
+    <button data-view="present">Present</button>
+  </div>
+
+  <section class="view sel" id="view-pad">
+    <div class="pad" id="pad">
+      <div class="hint">Move with one finger · tap to click<br>Two fingers to scroll · two-finger tap to right-click<br>Double-tap and hold to drag</div>
+    </div>
+    <div class="mbtns">
+      <button class="mbtn" data-btn="left">Left</button>
+      <button class="mbtn" data-btn="right">Right</button>
+    </div>
+  </section>
+
+  <section class="view" id="view-present">
+    <div class="nav">
+      <button class="key" data-key="left">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+        <small>Back</small>
+      </button>
+      <button class="key next" data-key="right">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+        <small>Next</small>
+      </button>
+    </div>
+    <div class="laser" id="laser"><span class="ldot"></span><span id="laserText">Hold and drag for laser</span></div>
+    <div class="row two">
+      <button class="small" data-key="b">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8"/><path d="M3 5l18 12" opacity=".6"/></svg>Blank
+      </button>
+      <button class="small" id="focus">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>Silence
+      </button>
+    </div>
+    <div class="row vol">
+      <button class="small" data-vol="down" aria-label="Volume down"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"/></svg></button>
+      <button class="level" id="level" data-vol="mute" aria-label="Mute">
+        <div class="fill"></div>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 10v4h4l5 4V6L8 10H4z"/><path id="wave" d="M16.5 9a4 4 0 0 1 0 6" stroke-linecap="round"/></svg><b id="lvl">–</b></span>
+      </button>
+      <button class="small" data-vol="up" aria-label="Volume up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12M12 6v12"/></svg></button>
+    </div>
+  </section>
+
+  <div class="sheet-bg" id="sheetBg"></div>
+  <div class="sheet" id="sheet">
+    <h3>Settings</h3>
+    <div class="field"><label>Pointer speed</label><input type="range" id="sPtr" min="0.5" max="4" step="0.1"><span class="val" id="vPtr"></span></div>
+    <div class="field"><label>Scroll speed</label><input type="range" id="sScr" min="0.5" max="4" step="0.1"><span class="val" id="vScr"></span></div>
+    <div class="field"><label>Laser speed</label><input type="range" id="sLas" min="1" max="6" step="0.1"><span class="val" id="vLas"></span></div>
+    <div class="field"><label>Natural scrolling</label><input type="checkbox" id="sNat"></div>
+    <p class="help">Add this page to your Home Screen (Share → Add to Home Screen) to keep the pairing and open it full-screen.<br>Silence runs a Shortcut named “Lectern Focus” on the Mac.</p>
+  </div>
+
+  <div class="gate" id="gate">
+    <h2>Not paired</h2>
+    <p>Run <b>lectern.py</b> on your Mac and scan the QR code it shows.</p>
+  </div>
+  <div class="toast" id="toast"></div>
+  <video id="awake" muted playsinline loop src="data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMxbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAB9AAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAlt0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAB9AAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAfQAAAAAAABAAAAAAHTbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAgABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABfm1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAT5zdGJsAAAAvnN0c2QAAAAAAAAAAQAAAK5hdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAANGF2Y0MBZAAK/+EAF2dkAAqs2V7ARAAAAwAEAAADAAg8SJZYAQAGaOvjyyLA/fj4AAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAAAtEAAALRAAAABhzdHRzAAAAAAAAAAEAAAACAABAAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAACAAAAAQAAABxzdHN6AAAAAAAAAAAAAAACAAACxQAAAAwAAAAUc3RjbwAAAAAAAAABAAADYQAAAGJ1ZHRhAAAAWm1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALWlsc3QAAAAlqXRvbwAAAB1kYXRhAAAAAQAAAABMYXZmNjAuMTYuMTAwAAAACGZyZWUAAALZbWRhdAAAAq0GBf//qdxF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjQgcjMxMDggMzFlMTlmOSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjMgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0xIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDM6MHgxMTMgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTEgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MyBiX3B5cmFtaWQ9MiBiX2FkYXB0PTEgYl9iaWFzPTAgZGlyZWN0PTEgd2VpZ2h0Yj0xIG9wZW5fZ29wPTAgd2VpZ2h0cD0yIGtleWludD0yNTAga2V5aW50X21pbj0xIHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1idHJlZT0xIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCBpcF9yYXRpbz0xLjQwIGFxPTE6MS4wMACAAAAAEGWIhAAW//730z/MsuyaJYEAAAAIQZohbEFf/vA="></video>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (s) => document.querySelector(s);
+
+  // ---------- settings
+  const defaults = { ptr: 1.6, scr: 1.6, las: 2.6, nat: true };
+  let S;
+  try { S = Object.assign({}, defaults, JSON.parse(localStorage.getItem("lectern.s") || "{}")); }
+  catch (e) { S = Object.assign({}, defaults); }
+  const save = () => { try { localStorage.setItem("lectern.s", JSON.stringify(S)); } catch (e) {} };
+  [["sPtr","vPtr","ptr"],["sScr","vScr","scr"],["sLas","vLas","las"]].forEach(([i,v,k]) => {
+    const el = $("#"+i); el.value = S[k]; $("#"+v).textContent = (+S[k]).toFixed(1);
+    el.oninput = () => { S[k] = +el.value; $("#"+v).textContent = S[k].toFixed(1); save(); };
+  });
+  $("#sNat").checked = S.nat; $("#sNat").onchange = (e) => { S.nat = e.target.checked; save(); };
+  const openSheet = (o) => { $("#sheet").classList.toggle("open", o); $("#sheetBg").classList.toggle("open", o); };
+  $("#gear").onclick = () => openSheet(true);
+  $("#sheetBg").onclick = () => openSheet(false);
+
+  // ---------- pairing key
+  const params = new URLSearchParams(location.search);
+  let key = params.get("k");
+  try {
+    if (key) localStorage.setItem("lectern.k", key); else key = localStorage.getItem("lectern.k");
+  } catch (e) {}
+  if (!key) { $("#gate").classList.add("show"); return; }
+
+  // ---------- connection
+  let ws = null, backoff = 400, pingTimer = null, pingSent = 0;
+  const dot = $("#dot"), host = $("#host"), lat = $("#lat");
+  function connect() {
+    dot.className = "dot wait";
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    ws = new WebSocket(proto + "://" + location.host + "/ws?k=" + encodeURIComponent(key));
+    ws.onopen = () => {
+      backoff = 400; dot.className = "dot on";
+      clearInterval(pingTimer);
+      pingTimer = setInterval(() => { pingSent = performance.now(); send({ t: "ping" }); }, 5000);
+      pingSent = performance.now(); send({ t: "ping" });
+    };
+    ws.onmessage = (e) => {
+      let m; try { m = JSON.parse(e.data); } catch (_) { return; }
+      if (m.t === "hello") {
+        host.textContent = m.host.replace(/\.local$/, "");
+        const b = $("#banner");
+        b.textContent = "Your Mac hasn’t given Accessibility permission to the terminal running Lectern, so clicks and keys are ignored. Enable it in System Settings → Privacy & Security → Accessibility, then restart Lectern.";
+        b.classList.toggle("show", !m.trusted);
+      } else if (m.t === "pong") {
+        lat.textContent = Math.round(performance.now() - pingSent) + " ms";
+      } else if (m.t === "vol") {
+        $("#level").style.setProperty("--lv", m.level + "%");
+        $("#lvl").textContent = m.muted ? "Muted" : m.level;
+        $("#level").classList.toggle("muted", m.muted);
+        $("#wave").style.display = m.muted ? "none" : "";
+      } else if (m.t === "note") {
+        toast(m.text);
+      }
+    };
+    ws.onclose = () => {
+      clearInterval(pingTimer); dot.className = "dot"; lat.textContent = "";
+      host.textContent = "Reconnecting…";
+      setTimeout(connect, backoff); backoff = Math.min(backoff * 1.8, 4000);
+    };
+    ws.onerror = () => { try { ws.close(); } catch (_) {} };
+  }
+  const send = (o) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+  connect();
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && (!ws || ws.readyState > 1)) { backoff = 400; connect(); }
+  });
+
+  // ---------- keep the phone awake (Wake Lock needs HTTPS; the muted looping video works over HTTP)
+  let awakeOn = false;
+  document.addEventListener("touchstart", () => {
+    if (awakeOn) return; awakeOn = true;
+    const v = $("#awake"); const p = v.play(); if (p && p.catch) p.catch(() => { awakeOn = false; });
+    if (navigator.wakeLock) navigator.wakeLock.request("screen").catch(() => {});
+  }, { passive: true });
+
+  // ---------- toast
+  let toastT;
+  function toast(t) { const el = $("#toast"); el.textContent = t; el.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove("show"), 3200); }
+
+  // ---------- tabs
+  document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
+    document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("sel", x === b));
+    document.querySelectorAll(".view").forEach((v) => v.classList.toggle("sel", v.id === "view-" + b.dataset.view));
+    $("#tabs").dataset.sel = b.dataset.view;
+  });
+
+  // ---------- batching: at most one move/scroll/laser message per animation frame
+  const acc = { mx: 0, my: 0, sx: 0, sy: 0, lx: 0, ly: 0, l: false };
+  let rafQueued = false;
+  function flush() {
+    rafQueued = false;
+    if (acc.mx || acc.my) { send({ t: "m", dx: +acc.mx.toFixed(2), dy: +acc.my.toFixed(2) }); acc.mx = acc.my = 0; }
+    const sx = Math.trunc(acc.sx), sy = Math.trunc(acc.sy);
+    if (sx || sy) { send({ t: "s", dx: sx, dy: sy }); acc.sx -= sx; acc.sy -= sy; }
+    if (acc.l) { send({ t: "laser", dx: +acc.lx.toFixed(2), dy: +acc.ly.toFixed(2) }); acc.lx = acc.ly = 0; acc.l = false; }
+  }
+  const queue = () => { if (!rafQueued) { rafQueued = true; requestAnimationFrame(flush); } };
+  const gain = (dist, dt) => { const v = dist / Math.max(dt, 1); return S.ptr * (0.6 + 1.6 * Math.min(v, 2.2)); };
+
+  // ---------- trackpad gestures
+  const pad = $("#pad");
+  const G = { mode: null, t0: 0, x0: 0, y0: 0, lx: 0, ly: 0, lt: 0, moved: false,
+              lastTapEnd: 0, dragArmed: false, dragging: false, vx: 0, vy: 0 };
+  let marks = [];
+  function showMarks(touches) {
+    marks.forEach((m) => m.remove()); marks = [];
+    const r = pad.getBoundingClientRect();
+    for (const t of touches) {
+      const m = document.createElement("div"); m.className = "touchmark";
+      m.style.left = (t.clientX - r.left) + "px"; m.style.top = (t.clientY - r.top) + "px";
+      pad.appendChild(m); marks.push(m);
+    }
+  }
+  const centroid = (ts) => { let x = 0, y = 0; for (const t of ts) { x += t.clientX; y += t.clientY; } return [x / ts.length, y / ts.length]; };
+  let momentum = null;
+  const stopMomentum = () => { if (momentum) cancelAnimationFrame(momentum); momentum = null; };
+
+  pad.addEventListener("touchstart", (e) => {
+    e.preventDefault(); pad.classList.add("used"); stopMomentum();
+    const ts = e.targetTouches, now = performance.now();
+    if (ts.length === 1 && G.mode === null) {
+      G.mode = "one"; G.t0 = now; G.lt = now; G.moved = false;
+      G.x0 = G.lx = ts[0].clientX; G.y0 = G.ly = ts[0].clientY;
+      G.dragArmed = now - G.lastTapEnd < 300;
+    } else if (ts.length >= 2) {
+      if (G.mode === "one" && !G.moved && !G.dragging) G.t0 = Math.min(G.t0, now); else G.t0 = now;
+      if (!G.dragging) { G.mode = "two"; G.moved = false; }
+      [G.lx, G.ly] = centroid([ts[0], ts[1]]); G.x0 = G.lx; G.y0 = G.ly; G.lt = now; G.vx = G.vy = 0;
+    }
+    showMarks(ts);
+  }, { passive: false });
+
+  pad.addEventListener("touchmove", (e) => {
+    e.preventDefault();
+    const ts = e.targetTouches, now = performance.now();
+    showMarks(ts);
+    if (G.mode === "one" || (G.dragging && ts.length >= 1)) {
+      const t = ts[0], dx = t.clientX - G.lx, dy = t.clientY - G.ly, dt = now - G.lt;
+      G.lx = t.clientX; G.ly = t.clientY; G.lt = now;
+      if (!G.moved && Math.hypot(t.clientX - G.x0, t.clientY - G.y0) > 6) {
+        G.moved = true;
+        if (G.dragArmed && !G.dragging) { G.dragging = true; pad.classList.add("dragging"); send({ t: "btn", b: "left", down: true }); }
+      }
+      if (G.moved) { const g = gain(Math.hypot(dx, dy), dt); acc.mx += dx * g; acc.my += dy * g; queue(); }
+    } else if (G.mode === "two" && ts.length >= 2) {
+      const [cx, cy] = centroid([ts[0], ts[1]]);
+      const dx = cx - G.lx, dy = cy - G.ly, dt = Math.max(now - G.lt, 1);
+      G.lx = cx; G.ly = cy; G.lt = now;
+      if (!G.moved && Math.hypot(cx - G.x0, cy - G.y0) > 8) G.moved = true;
+      if (G.moved) {
+        const k = S.scr * (S.nat ? 1 : -1);
+        acc.sx += dx * k; acc.sy += dy * k; queue();
+        G.vx = 0.7 * G.vx + 0.3 * (dx * k / dt); G.vy = 0.7 * G.vy + 0.3 * (dy * k / dt);
+      }
+    }
+  }, { passive: false });
+
+  function endPad(e) {
+    e.preventDefault();
+    const ts = e.targetTouches, now = performance.now();
+    showMarks(ts);
+    if (ts.length > 0) { if (G.mode === "two" && ts.length === 1) G.mode = "lift"; return; }
+    if (G.dragging) {
+      send({ t: "btn", b: "left", down: false }); G.dragging = false; pad.classList.remove("dragging");
+    } else if (G.mode === "one" && !G.moved && now - G.t0 < 260) {
+      send({ t: "click", b: "left" }); G.lastTapEnd = now;
+    } else if ((G.mode === "two" || G.mode === "lift") && !G.moved && now - G.t0 < 320) {
+      send({ t: "click", b: "right" });
+    } else if ((G.mode === "two" || G.mode === "lift") && G.moved && now - G.lt < 60) {
+      let vx = G.vx, vy = G.vy, last = now;
+      const step = (t) => {
+        const dt = t - last; last = t;
+        vx *= Math.pow(0.94, dt / 16); vy *= Math.pow(0.94, dt / 16);
+        if (Math.hypot(vx, vy) < 0.05) { momentum = null; return; }
+        acc.sx += vx * dt; acc.sy += vy * dt; queue();
+        momentum = requestAnimationFrame(step);
+      };
+      if (Math.hypot(vx, vy) > 0.25) momentum = requestAnimationFrame(step);
+    }
+    G.mode = null; G.dragArmed = false;
+  }
+  pad.addEventListener("touchend", endPad, { passive: false });
+  pad.addEventListener("touchcancel", endPad, { passive: false });
+
+  // physical-style buttons: hold Left and move with another finger to drag
+  document.querySelectorAll("[data-btn]").forEach((b) => {
+    const down = (e) => { e.preventDefault(); b.classList.add("down"); send({ t: "btn", b: b.dataset.btn, down: true }); };
+    const up = (e) => { e.preventDefault(); if (!b.classList.contains("down")) return; b.classList.remove("down"); send({ t: "btn", b: b.dataset.btn, down: false }); };
+    b.addEventListener("touchstart", down, { passive: false });
+    b.addEventListener("touchend", up, { passive: false });
+    b.addEventListener("touchcancel", up, { passive: false });
+  });
+
+  // ---------- present controls: fire on touchstart, not on click, to save ~100 ms
+  function press(el, fn) {
+    el.addEventListener("touchstart", (e) => { e.preventDefault(); el.classList.add("down"); fn(); }, { passive: false });
+    const up = (e) => { e.preventDefault(); el.classList.remove("down"); };
+    el.addEventListener("touchend", up, { passive: false });
+    el.addEventListener("touchcancel", up, { passive: false });
+    el.addEventListener("click", (e) => { if (e.detail !== 0 || !("ontouchstart" in window)) fn(); }); // keyboard / desktop
+  }
+  document.querySelectorAll("[data-key]").forEach((el) => press(el, () => send({ t: "key", k: el.dataset.key })));
+  document.querySelectorAll("[data-vol]").forEach((el) => press(el, () => send({ t: "vol", a: el.dataset.vol })));
+  press($("#focus"), () => send({ t: "focus" }));
+
+  // ---------- laser
+  const laser = $("#laser"); let lp = null;
+  laser.addEventListener("touchstart", (e) => {
+    e.preventDefault(); const t = e.targetTouches[0]; lp = [t.clientX, t.clientY];
+    laser.classList.add("on"); $("#laserText").textContent = "Laser on";
+    acc.l = true; queue();
+  }, { passive: false });
+  laser.addEventListener("touchmove", (e) => {
+    e.preventDefault(); if (!lp) return; const t = e.targetTouches[0];
+    acc.lx += (t.clientX - lp[0]) * S.las; acc.ly += (t.clientY - lp[1]) * S.las; acc.l = true; lp = [t.clientX, t.clientY]; queue();
+  }, { passive: false });
+  const laserEnd = (e) => {
+    e.preventDefault(); if (e.targetTouches.length) return; lp = null;
+    laser.classList.remove("on"); $("#laserText").textContent = "Hold and drag for laser";
+    flush(); send({ t: "laser", on: false });
+  };
+  laser.addEventListener("touchend", laserEnd, { passive: false });
+  laser.addEventListener("touchcancel", laserEnd, { passive: false });
+
+  // ---------- talk timer: tap = start/pause, hold 0.6 s = reset
+  const timerEl = $("#timer"); let tStart = 0, tAcc = 0, tRun = false, tTick = null, holdT = null;
+  const fmt = (ms) => { const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+  const render = () => { timerEl.textContent = fmt(tAcc + (tRun ? Date.now() - tStart : 0)); };
+  timerEl.addEventListener("touchstart", (e) => {
+    e.preventDefault();
+    holdT = setTimeout(() => { holdT = null; tRun = false; tAcc = 0; clearInterval(tTick); timerEl.classList.remove("run"); render(); toast("Timer reset"); }, 600);
+  }, { passive: false });
+  timerEl.addEventListener("touchend", (e) => {
+    e.preventDefault(); if (!holdT) return; clearTimeout(holdT); holdT = null;
+    if (tRun) { tAcc += Date.now() - tStart; tRun = false; clearInterval(tTick); }
+    else { tStart = Date.now(); tRun = true; tTick = setInterval(render, 250); }
+    timerEl.classList.toggle("run", tRun); render();
+  }, { passive: false });
+})();
+</script>
+</body>
+</html>

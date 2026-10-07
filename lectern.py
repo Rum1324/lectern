@@ -1,0 +1,602 @@
+#!/usr/bin/env python3
+"""Lectern: control your Mac from your phone (trackpad + presentation remote).
+
+Zero dependencies. Python 3.9+ (the python3 that ships with macOS Command Line Tools works).
+Run:  python3 lectern.py           (then scan the QR code that opens in your browser)
+      python3 lectern.py --dry-run (log events instead of moving the mouse; works on any OS)
+"""
+import argparse
+import asyncio
+import base64
+import ctypes
+import ctypes.util
+import hashlib
+import json
+import mimetypes
+import os
+import secrets
+import socket
+import struct
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+WEB = os.path.join(HERE, "web")
+CONF_DIR = os.path.expanduser("~/.config/lectern")
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+# macOS virtual key codes
+KEY = {"right": 124, "left": 123, "down": 125, "up": 126, "b": 11, "esc": 53, "space": 49}
+
+
+# --------------------------------------------------------------------------- backends
+class DryRunBackend:
+    """Logs every action. Used for testing and on non-macOS systems."""
+
+    def __init__(self):
+        self.x, self.y = 960.0, 540.0
+        self.w, self.h = 1920.0, 1080.0
+        self.log = []
+
+    def _rec(self, *a):
+        self.log.append(a)
+        print("[dry-run]", *a, flush=True)
+
+    def bounds(self):
+        return 0.0, 0.0, self.w, self.h
+
+    def position(self):
+        return self.x, self.y
+
+    def move_to(self, x, y, dragging):
+        self.x, self.y = x, y
+        self._rec("drag" if dragging else "move", round(x), round(y))
+
+    def button(self, which, down, clicks):
+        self._rec("button", which, "down" if down else "up", clicks)
+
+    def scroll(self, dx, dy):
+        self._rec("scroll", dx, dy)
+
+    def key(self, code, flags=0):
+        self._rec("key", code, flags)
+
+    def trusted(self):
+        return True
+
+
+class MacBackend:
+    """Posts CoreGraphics events through ctypes. Needs Accessibility permission."""
+
+    class CGPoint(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double)]
+
+    class CGRect(ctypes.Structure):
+        pass
+
+    def __init__(self):
+        P = self.CGPoint
+
+        class CGSize(ctypes.Structure):
+            _fields_ = [("width", ctypes.c_double), ("height", ctypes.c_double)]
+
+        self.CGRect._fields_ = [("origin", P), ("size", CGSize)]
+        cg = ctypes.cdll.LoadLibrary(
+            "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+        cf = ctypes.cdll.LoadLibrary(
+            "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        ax = ctypes.cdll.LoadLibrary(
+            "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
+        vp, u32, i32 = ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int32
+
+        cg.CGEventCreate.argtypes, cg.CGEventCreate.restype = [vp], vp
+        cg.CGEventGetLocation.argtypes, cg.CGEventGetLocation.restype = [vp], P
+        cg.CGEventCreateMouseEvent.argtypes = [vp, u32, P, u32]
+        cg.CGEventCreateMouseEvent.restype = vp
+        cg.CGEventCreateKeyboardEvent.argtypes = [vp, ctypes.c_uint16, ctypes.c_bool]
+        cg.CGEventCreateKeyboardEvent.restype = vp
+        cg.CGEventCreateScrollWheelEvent2.argtypes = [vp, u32, u32, i32, i32, i32]
+        cg.CGEventCreateScrollWheelEvent2.restype = vp
+        cg.CGEventSetIntegerValueField.argtypes = [vp, u32, ctypes.c_int64]
+        cg.CGEventSetFlags.argtypes = [vp, ctypes.c_uint64]
+        cg.CGEventPost.argtypes = [u32, vp]
+        cg.CGMainDisplayID.restype = u32
+        cg.CGGetActiveDisplayList.argtypes = [u32, ctypes.POINTER(u32), ctypes.POINTER(u32)]
+        cg.CGDisplayBounds.argtypes, cg.CGDisplayBounds.restype = [u32], self.CGRect
+        cf.CFRelease.argtypes = [vp]
+        ax.AXIsProcessTrusted.restype = ctypes.c_bool
+        self.cg, self.cf, self.ax = cg, cf, ax
+
+    def trusted(self):
+        return bool(self.ax.AXIsProcessTrusted())
+
+    def bounds(self):
+        """Union of all active displays, in global top-left coordinates."""
+        ids = (ctypes.c_uint32 * 16)()
+        n = ctypes.c_uint32(0)
+        self.cg.CGGetActiveDisplayList(16, ids, ctypes.byref(n))
+        rects = [self.cg.CGDisplayBounds(ids[i]) for i in range(n.value)] or \
+            [self.cg.CGDisplayBounds(self.cg.CGMainDisplayID())]
+        x0 = min(r.origin.x for r in rects)
+        y0 = min(r.origin.y for r in rects)
+        x1 = max(r.origin.x + r.size.width for r in rects)
+        y1 = max(r.origin.y + r.size.height for r in rects)
+        return x0, y0, x1, y1
+
+    def position(self):
+        ev = self.cg.CGEventCreate(None)
+        p = self.cg.CGEventGetLocation(ev)
+        self.cf.CFRelease(ev)
+        return p.x, p.y
+
+    def _post(self, ev):
+        self.cg.CGEventPost(0, ev)  # kCGHIDEventTap
+        self.cf.CFRelease(ev)
+
+    def move_to(self, x, y, dragging):
+        # 6 = kCGEventLeftMouseDragged, 5 = kCGEventMouseMoved
+        etype = 6 if dragging == "left" else (7 if dragging == "right" else 5)
+        btn = 1 if dragging == "right" else 0
+        self._post(self.cg.CGEventCreateMouseEvent(None, etype, self.CGPoint(x, y), btn))
+
+    def button(self, which, down, clicks):
+        x, y = self.position()
+        if which == "left":
+            etype, btn = (1 if down else 2), 0
+        else:
+            etype, btn = (3 if down else 4), 1
+        ev = self.cg.CGEventCreateMouseEvent(None, etype, self.CGPoint(x, y), btn)
+        self.cg.CGEventSetIntegerValueField(ev, 1, clicks)  # kCGMouseEventClickState
+        self._post(ev)
+
+    def scroll(self, dx, dy):
+        # unit 0 = pixel; wheel1 = vertical, wheel2 = horizontal
+        self._post(self.cg.CGEventCreateScrollWheelEvent2(None, 0, 2, int(dy), int(dx), 0))
+
+    def key(self, code, flags=0):
+        for down in (True, False):
+            ev = self.cg.CGEventCreateKeyboardEvent(None, code, down)
+            if flags:
+                self.cg.CGEventSetFlags(ev, flags)
+            self._post(ev)
+
+
+# --------------------------------------------------------------------------- laser dot
+class Laser:
+    """Red dot drawn by a tiny Swift helper (compiled once). Falls back to moving the cursor."""
+
+    def __init__(self, backend, dry):
+        self.backend, self.dry = backend, dry
+        self.proc = None
+        self.binary = os.path.join(CONF_DIR, "laser-helper")
+        self.x = self.y = None
+        self.ready = False
+
+    async def prepare(self):
+        if self.dry or sys.platform != "darwin":
+            return
+        src = os.path.join(HERE, "laser.swift")
+        fresh = os.path.exists(self.binary) and \
+            os.path.getmtime(self.binary) >= os.path.getmtime(src)
+        if not fresh:
+            os.makedirs(CONF_DIR, exist_ok=True)
+            p = await asyncio.create_subprocess_exec(
+                "swiftc", "-O", src, "-o", self.binary,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+            _, err = await p.communicate()
+            if p.returncode != 0:
+                print("  laser: Swift compile failed, laser will move the cursor instead.\n   ",
+                      err.decode()[-300:].strip())
+                return
+        self.ready = True
+
+    def _send(self, line):
+        if not self.ready:
+            return False
+        if self.proc is None or self.proc.poll() is not None:
+            self.proc = subprocess.Popen([self.binary], stdin=subprocess.PIPE, text=True,
+                                         bufsize=1)
+        try:
+            self.proc.stdin.write(line + "\n")
+            return True
+        except (BrokenPipeError, OSError):
+            self.proc = None
+            return False
+
+    def start(self):
+        self.x, self.y = self.backend.position()
+
+    def move(self, dx, dy):
+        if self.x is None:
+            self.start()
+        x0, y0, x1, y1 = self.backend.bounds()
+        self.x = min(max(self.x + dx, x0), x1 - 1)
+        self.y = min(max(self.y + dy, y0), y1 - 1)
+        if not self._send("show %.1f %.1f" % (self.x, self.y)):
+            self.backend.move_to(self.x, self.y, None)
+
+    def hide(self):
+        self._send("hide")
+        self.x = self.y = None
+
+    def close(self):
+        if self.proc and self.proc.poll() is None:
+            self._send("quit")
+
+
+# --------------------------------------------------------------------------- controller
+class Controller:
+    def __init__(self, backend, laser):
+        self.b = backend
+        self.laser = laser
+        self.held = None          # "left" / "right" while a button is held
+        self.last_click = (0.0, 0.0, 0.0, 0)  # time, x, y, count
+
+    def _clicks(self):
+        """macOS only treats a click as a double-click if clickState says so."""
+        t = time.monotonic()
+        x, y = self.b.position()
+        lt, lx, ly, n = self.last_click
+        n = n + 1 if (t - lt < 0.45 and abs(x - lx) < 6 and abs(y - ly) < 6) else 1
+        self.last_click = (t, x, y, n)
+        return n
+
+    def move(self, dx, dy):
+        x, y = self.b.position()
+        x0, y0, x1, y1 = self.b.bounds()
+        nx = min(max(x + dx, x0), x1 - 1)
+        ny = min(max(y + dy, y0), y1 - 1)
+        self.b.move_to(nx, ny, self.held)
+
+    def click(self, which):
+        n = self._clicks() if which == "left" else 1
+        self.b.button(which, True, n)
+        self.b.button(which, False, n)
+
+    def press(self, which, down):
+        if down:
+            if self.held:
+                return
+            # A held press starts a drag; clickState 1 so a recent tap doesn't turn it into
+            # a double/triple-click (which would select words or lines instead of dragging).
+            self.held = which
+            self.last_click = (0.0, 0.0, 0.0, 0)
+            self.b.button(which, True, 1)
+        elif self.held == which:
+            self.b.button(which, False, 1)
+            self.held = None
+
+    def release_all(self):
+        if self.held:
+            self.press(self.held, False)
+        self.laser.hide()
+
+
+async def osa(script):
+    p = await asyncio.create_subprocess_exec(
+        "osascript", "-e", script,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    out, err = await p.communicate()
+    return p.returncode, out.decode().strip(), err.decode().strip()
+
+
+async def volume(action, dry):
+    if dry or sys.platform != "darwin":
+        print("[dry-run] volume", action, flush=True)
+        return {"t": "vol", "level": 50, "muted": False}
+    scripts = {
+        "up": "set volume output volume ((output volume of (get volume settings)) + 6)",
+        "down": "set volume output volume ((output volume of (get volume settings)) - 6)",
+        "mute": "set volume output muted (not (output muted of (get volume settings)))",
+        "get": "",
+    }
+    s = scripts.get(action)
+    if s is None:
+        return None
+    if s:
+        await osa(s)
+    rc, out, _ = await osa(
+        'set s to get volume settings\nreturn ((output volume of s) as text) & "," & '
+        '((output muted of s) as text)')
+    try:
+        lvl, muted = out.split(",")
+        return {"t": "vol", "level": int(lvl), "muted": muted == "true"}
+    except ValueError:
+        return None
+
+
+async def focus_toggle(dry):
+    """macOS has no API to toggle Do Not Disturb; this runs a user-made Shortcut."""
+    if dry or sys.platform != "darwin":
+        print("[dry-run] focus toggle", flush=True)
+        return {"t": "note", "text": "Focus toggled (dry run)"}
+    p = await asyncio.create_subprocess_exec(
+        "shortcuts", "run", "Lectern Focus",
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+    _, err = await p.communicate()
+    if p.returncode == 0:
+        return {"t": "note", "text": "Focus toggled"}
+    return {"t": "note", "text": "Create a Shortcut named “Lectern Focus” on your Mac "
+                                 "(Set Focus → Do Not Disturb → Toggle)."}
+
+
+# --------------------------------------------------------------------------- websocket
+async def ws_send(writer, obj):
+    data = json.dumps(obj).encode()
+    n = len(data)
+    if n < 126:
+        head = struct.pack("!BB", 0x81, n)
+    elif n < 65536:
+        head = struct.pack("!BBH", 0x81, 126, n)
+    else:
+        head = struct.pack("!BBQ", 0x81, 127, n)
+    writer.write(head + data)
+    await writer.drain()
+
+
+async def ws_recv(reader):
+    """Returns (opcode, payload bytes)."""
+    b1, b2 = await reader.readexactly(2)
+    op, masked, n = b1 & 0x0F, b2 & 0x80, b2 & 0x7F
+    if n == 126:
+        n = struct.unpack("!H", await reader.readexactly(2))[0]
+    elif n == 127:
+        n = struct.unpack("!Q", await reader.readexactly(8))[0]
+    if n > 1 << 20:
+        raise ConnectionError("frame too large")
+    mask = await reader.readexactly(4) if masked else b"\0\0\0\0"
+    data = bytearray(await reader.readexactly(n))
+    for i in range(n):
+        data[i] ^= mask[i & 3]
+    return op, bytes(data)
+
+
+# --------------------------------------------------------------------------- server
+class Server:
+    def __init__(self, args):
+        self.args = args
+        self.dry = args.dry_run or sys.platform != "darwin"
+        self.backend = DryRunBackend() if self.dry else MacBackend()
+        self.laser = Laser(self.backend, self.dry)
+        self.ctl = Controller(self.backend, self.laser)
+        self.token = self._load_token()
+        self.clients = set()
+
+    def _load_token(self):
+        if self.args.token:
+            return self.args.token
+        path = os.path.join(CONF_DIR, "token")
+        try:
+            with open(path) as f:
+                t = f.read().strip()
+                if t:
+                    return t
+        except OSError:
+            pass
+        os.makedirs(CONF_DIR, exist_ok=True)
+        t = secrets.token_urlsafe(9)
+        with open(path, "w") as f:
+            f.write(t)
+        os.chmod(path, 0o600)
+        return t
+
+    # ---- http
+    async def handle(self, reader, writer):
+        try:
+            head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 10)
+        except Exception:
+            writer.close()
+            return
+        lines = head.decode("latin-1").split("\r\n")
+        try:
+            method, target, _ = lines[0].split(" ", 2)
+        except ValueError:
+            writer.close()
+            return
+        headers = {}
+        for ln in lines[1:]:
+            if ":" in ln:
+                k, v = ln.split(":", 1)
+                headers[k.strip().lower()] = v.strip()
+        path, _, query = target.partition("?")
+        params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
+
+        if path == "/ws" and headers.get("upgrade", "").lower() == "websocket":
+            if not secrets.compare_digest(params.get("k", ""), self.token):
+                await self._respond(writer, 403, b"bad pairing key", "text/plain")
+                return
+            await self._websocket(reader, writer, headers)
+            return
+
+        # The pairing page shows the key, so it is served only to a browser on this Mac.
+        # A tunnel or reverse proxy also connects from 127.0.0.1, so loopback alone is not
+        # enough: require a localhost Host header and no forwarding headers as well.
+        peer = writer.get_extra_info("peername")
+        host = headers.get("host", "").rsplit(":", 1)[0].strip("[]")
+        forwarded = any(h in headers for h in
+                        ("x-forwarded-for", "forwarded", "cf-connecting-ip", "cf-ray",
+                         "x-real-ip"))
+        local = bool(peer) and peer[0] in ("127.0.0.1", "::1") and \
+            host in ("127.0.0.1", "localhost", "::1") and not forwarded
+        if path == "/pair" and local:
+            await self._respond(writer, 200, self._pair_page(), "text/html; charset=utf-8")
+            return
+        if path == "/pair.json" and local:
+            body = json.dumps({"urls": self.urls(), "key": self.token}).encode()
+            await self._respond(writer, 200, body, "application/json")
+            return
+        if path in ("/", "/index.html"):
+            path = "/index.html"
+        fp = os.path.normpath(os.path.join(WEB, path.lstrip("/")))
+        if not fp.startswith(WEB + os.sep) or not os.path.isfile(fp) or \
+                os.path.basename(fp) == "pair.html":
+            await self._respond(writer, 404, b"not found", "text/plain")
+            return
+        with open(fp, "rb") as f:
+            body = f.read()
+        ctype = mimetypes.guess_type(fp)[0] or "application/octet-stream"
+        await self._respond(writer, 200, body, ctype)
+
+    async def _respond(self, writer, code, body, ctype):
+        reason = {200: "OK", 403: "Forbidden", 404: "Not Found"}.get(code, "OK")
+        writer.write(("HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %d\r\n"
+                      "Cache-Control: no-store\r\nConnection: close\r\n\r\n"
+                      % (code, reason, ctype, len(body))).encode() + body)
+        try:
+            await writer.drain()
+        finally:
+            writer.close()
+
+    def _pair_page(self):
+        with open(os.path.join(WEB, "pair.html"), "rb") as f:
+            return f.read()
+
+    # ---- websocket session
+    async def _websocket(self, reader, writer, headers):
+        key = headers.get("sec-websocket-key", "")
+        accept = base64.b64encode(hashlib.sha1((key + WS_GUID).encode()).digest()).decode()
+        writer.write(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                      "Connection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n"
+                      % accept).encode())
+        await writer.drain()
+        sock = writer.get_extra_info("socket")
+        if sock is not None:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        peer = writer.get_extra_info("peername")
+        print("  phone connected:", peer[0] if peer else "?", flush=True)
+        self.clients.add(writer)
+        await ws_send(writer, {"t": "hello", "host": socket.gethostname(),
+                               "trusted": self.backend.trusted()})
+        v = await volume("get", self.dry)
+        if v:
+            await ws_send(writer, v)
+        try:
+            while True:
+                op, data = await asyncio.wait_for(ws_recv(reader), 30)
+                if op == 0x8:      # close
+                    break
+                if op == 0x9:      # ping -> pong
+                    writer.write(struct.pack("!BB", 0x8A, len(data)) + data)
+                    continue
+                if op != 0x1:
+                    continue
+                try:
+                    msg = json.loads(data)
+                except ValueError:
+                    continue
+                reply = await self.dispatch(msg)
+                if reply:
+                    await ws_send(writer, reply)
+        except (asyncio.IncompleteReadError, ConnectionError, asyncio.TimeoutError, OSError):
+            pass
+        finally:
+            self.ctl.release_all()
+            self.clients.discard(writer)
+            print("  phone disconnected", flush=True)
+            writer.close()
+
+    async def dispatch(self, m):
+        t = m.get("t")
+        c = self.ctl
+        if t == "m":
+            c.move(float(m.get("dx", 0)), float(m.get("dy", 0)))
+        elif t == "click":
+            c.click("right" if m.get("b") == "right" else "left")
+        elif t == "btn":
+            c.press("right" if m.get("b") == "right" else "left", bool(m.get("down")))
+        elif t == "s":
+            c.b.scroll(round(float(m.get("dx", 0))), round(float(m.get("dy", 0))))
+        elif t == "key":
+            code = KEY.get(m.get("k"))
+            if code is not None:
+                c.b.key(code)
+        elif t == "laser":
+            if m.get("on") is False:
+                self.laser.hide()
+            else:
+                self.laser.move(float(m.get("dx", 0)), float(m.get("dy", 0)))
+        elif t == "vol":
+            return await volume(m.get("a", "get"), self.dry)
+        elif t == "focus":
+            return await focus_toggle(self.dry)
+        elif t == "ping":
+            return {"t": "pong", "id": m.get("id")}
+        return None
+
+    # ---- addresses
+    def urls(self):
+        port, k = self.args.port, self.token
+        out = []
+        for ip in lan_ips():
+            out.append("http://%s:%d/?k=%s" % (ip, port, k))
+        # name.local survives IP changes but some Android versions can't resolve it, so it's 2nd
+        if sys.platform == "darwin":
+            try:
+                name = subprocess.run(["scutil", "--get", "LocalHostName"],
+                                      capture_output=True, text=True).stdout.strip()
+                if name:
+                    out.append("http://%s.local:%d/?k=%s" % (name, port, k))
+            except OSError:
+                pass
+        return out
+
+    async def run(self):
+        srv = await asyncio.start_server(self.handle, self.args.host, self.args.port)
+        await self.laser.prepare()
+        print("\nLectern is running%s." % (" (dry run: nothing is moved)" if self.dry else ""))
+        for u in self.urls():
+            print("  open on your phone:", u)
+        if not self.dry and not self.backend.trusted():
+            print("\n  ! macOS has not granted Accessibility to this terminal app, so clicks and"
+                  "\n    keys will be ignored. Turn it on in the pane that just opened, then"
+                  "\n    restart Lectern.")
+            subprocess.run(["open", "x-apple.systempreferences:com.apple.preference.security"
+                                    "?Privacy_Accessibility"])
+        if not self.args.no_browser and sys.platform == "darwin":
+            subprocess.run(["open", "http://127.0.0.1:%d/pair" % self.args.port])
+        print("\n  Ctrl+C to stop.\n", flush=True)
+        async with srv:
+            await srv.serve_forever()
+
+
+def lan_ips():
+    ips = []
+    try:  # address of the interface that carries the default route
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("10.255.255.255", 1))
+        ips.append(s.getsockname()[0])
+        s.close()
+    except OSError:
+        pass
+    if sys.platform == "darwin":
+        for iface in ("en0", "en1", "bridge100"):
+            try:
+                ip = subprocess.run(["ipconfig", "getifaddr", iface], capture_output=True,
+                                    text=True).stdout.strip()
+                if ip and ip not in ips:
+                    ips.append(ip)
+            except OSError:
+                pass
+    return [i for i in ips if not i.startswith("127.")]
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--host", default="0.0.0.0")
+    ap.add_argument("--dry-run", action="store_true", help="log events instead of acting")
+    ap.add_argument("--token", help="override the saved pairing key")
+    ap.add_argument("--no-browser", action="store_true", help="don't open the QR page")
+    args = ap.parse_args()
+    server = Server(args)
+    try:
+        asyncio.run(server.run())
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.laser.close()
+
+
+if __name__ == "__main__":
+    main()

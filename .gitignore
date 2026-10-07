@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+tests/.server.log
+tests/.ui-server.log
+tests/screenshots/
+.DS_Store
