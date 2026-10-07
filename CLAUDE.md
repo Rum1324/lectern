@@ -18,6 +18,8 @@ Wi-Fi blocks phone→laptop traffic (verified 2026-10-07: run with `--tunnel` th
 | osascript volume, Accessibility check | verified |
 | `shortcuts run` focus toggle | not verified: no "Lectern Focus" Shortcut exists yet, so the instruction toast path runs |
 | `--tunnel` (cloudflared quick tunnel) | verified end to end from campus Wi-Fi; WebSocket ping RTT 50-70 ms |
+| `--tunnel` named mode (`https://lectern.<your-domain>`) | verified from the Mac: page, manifest, icons, /pair locked, WebSocket ping RTT 40-50 ms. Set up on Sota's Mac on 2026-10-07 |
+| Installable app (manifest + service worker) | served and registered without errors in headless Chromium; **"Install app" on the real Android phone not yet tried** |
 | Real Android phone over campus Wi-Fi | **blocked by the network**: UC Berkeley Wi-Fi isolates clients, confirmed. Use `--tunnel` there. |
 | Real Android phone over the tunnel | connects; gesture checklist (items 2-10) still to be walked through |
 
@@ -25,9 +27,12 @@ Wi-Fi blocks phone→laptop traffic (verified 2026-10-07: run with `--tunnel` th
 
 ```
 python3 lectern.py                 # real mode (macOS); opens pairing page with QR
-python3 lectern.py --tunnel        # also opens a Cloudflare quick tunnel; needed on campus Wi-Fi
+python3 lectern.py --tunnel        # also opens a Cloudflare tunnel; needed on campus Wi-Fi.
+                                   # Named (fixed https://lectern.<your-domain>) if
+                                   # ~/.config/lectern/tunnel.yml exists, else a quick tunnel
+python3 lectern.py --tunnel-setup lectern.<your-domain>   # one-time; needs `cloudflared tunnel login`
 python3 lectern.py --dry-run       # logs "[dry-run] ..." instead of posting events; any OS
-python3 -m unittest discover -s tests -v   # 21 tests, ~15 s; UI tests skip without Playwright
+python3 -m unittest discover -s tests -v   # 22 tests, ~15 s; UI tests skip without Playwright
 pip install playwright && python3 -m playwright install chromium   # for tests/test_ui.py
 ```
 
@@ -38,7 +43,9 @@ lectern.py        server: HTTP + hand-rolled WebSocket (asyncio), Controller, ba
 laser.swift       red-dot overlay; compiled by lectern.py with swiftc into ~/.config/lectern/
 web/index.html    the whole phone app (HTML+CSS+JS, one file, no build step)
 web/pair.html     QR pairing page, served only to a browser on the Mac itself
-web/icon.png      home-screen icon (original)
+web/manifest.webmanifest  makes the page installable ("Install app") on Android Chrome over HTTPS
+web/sw.js         service worker: caches only the app shell (/, manifest, icons); never /ws
+web/icon.png      home-screen icon (original); icon-192/512.png are sips resizes of it
 start.command     double-click launcher
 tests/            protocol + UI tests (see above)
 ```
@@ -56,6 +63,9 @@ tests/            protocol + UI tests (see above)
 ## Architecture
 
 Phone page ⇄ WebSocket `/ws?k=<key>` ⇄ `Server.dispatch` → `Controller` → backend.
+With `--tunnel`: phone ⇄ Cloudflare edge ⇄ cloudflared (child process, `Tunnel`) ⇄ localhost.
+The page is a PWA when served over HTTPS: `manifest.webmanifest` + `sw.js` (shell cache only).
+The pairing key lives in the phone's localStorage, so the installed app's `start_url` is `/`.
 Backend is `MacBackend` (ctypes → CoreGraphics `CGEventPost`) or `DryRunBackend` (logs).
 
 Client → server messages (JSON text frames):
@@ -106,8 +116,15 @@ Details that are easy to break:
    propagating (the phone is unaffected); quick-tunnel URL changes every run, so the
    home-screen shortcut lasts one session; `Server._tunnel_failed` policy is a TODO(human).
    Gotcha found the hard way: cloudflared silently loads `~/.cloudflared/config.yml` (Sota has
-   one from another project with a catch-all `http_status:404`), which overrides `--url` and
-   makes every quick tunnel 404. Lectern therefore passes its own `--config` with just `url:`.
+   one from another project with `tunnel: <focus id>` and a catch-all `http_status:404`). That
+   file overrides `--url` (every quick tunnel 404s) **and** the tunnel name passed to any
+   subcommand (`route dns lectern …` routed to the focus tunnel → 1033/530). Lectern therefore
+   passes its own `--config` to every cloudflared invocation. Named tunnel `lectern`
+   (id <id>…) with CNAME `lectern.<your-domain>` exists in Sota's Cloudflare account;
+   `~/.config/lectern/tunnel.yml` is rewritten on each run with the current port.
+   Cloudflare caches `.js` by extension at the edge; a 530 served during the misroute stayed
+   cached for `/sw.js` for a while (cache-busted URL was fine). If "Install app" doesn't
+   appear, check `curl -I https://lectern.<your-domain>/sw.js` is 200.
 3. **Android Bluetooth HID app** (alternative to Wi-Fi/tunnel): Android 9+ `BluetoothHidDevice`
    makes the phone a Bluetooth mouse+keyboard; no Mac software, works on any network. Loses
    laser overlay and volume readout (consumer-control volume keys still possible). Needs

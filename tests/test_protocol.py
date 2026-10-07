@@ -199,7 +199,15 @@ class ProtocolTest(unittest.TestCase):
                 break
             data += c
         s.close()
+        self.last_headers = data.split(b"\r\n\r\n", 1)[0].decode("latin-1").lower()
         return int(data.split(b" ")[1])
+
+    def test_app_manifest_and_service_worker_types(self):
+        self.assertEqual(self.http("/manifest.webmanifest"), 200)
+        self.assertIn("content-type: application/manifest+json", self.last_headers)
+        self.assertEqual(self.http("/sw.js"), 200)
+        self.assertIn("content-type: text/javascript", self.last_headers)
+        self.assertEqual(self.http("/icon-512.png"), 200)
 
     def test_static_and_traversal(self):
         self.assertEqual(self.http("/"), 200)
