@@ -92,7 +92,9 @@ logs everything to `~/.config/lectern/app.log`, and SIGTERMs the child on Stop/Q
 then SIGKILL). lectern.py handles SIGINT/SIGTERM/SIGHUP through `loop.add_signal_handler`
 and closes phone connections before the server: raising SystemExit from a plain signal
 handler made Python 3.12's `wait_closed()` hang until the phone's 30 s idle timeout. "Use tunnel" is a UserDefaults bool, default on; toggling it
-restarts the server. Accessibility must be granted to Lectern.app itself (not Terminal). The grant is keyed to the
+restarts the server. Advanced → "Use my fixed address" (shown only when
+~/.config/lectern/tunnel.yml exists, default on) passes `--quick-tunnel` when off, to get the
+random address new users get; Sota's installed PWA needs it on. Accessibility must be granted to Lectern.app itself (not Terminal). The grant is keyed to the
 code signature: ad-hoc signatures change every build, so `./make-signing-cert.sh` creates a
 self-signed "Lectern Dev" identity that build-app.sh uses when present (Sota's Mac has it).
 A stuck or stale entry in the Accessibility list: `tccutil reset Accessibility

@@ -101,4 +101,4 @@ Everything runs on your own Mac; nothing is hosted. The tunnel modes use Cloudfl
 
 ## Options
 
-`--tunnel` (public HTTPS address via Cloudflare) · `--tunnel-setup <hostname>` (one-time, fixed address) · `--port 8765` · `--dry-run` (log instead of acting) · `--no-browser` · `--token <key>`
+`--tunnel` (public HTTPS address via Cloudflare) · `--tunnel-setup <hostname>` (one-time, fixed address) · `--quick-tunnel` (random address even with a fixed one set up; menu bar app: Advanced → Use my fixed address) · `--port 8765` · `--dry-run` (log instead of acting) · `--no-browser` · `--token <key>`

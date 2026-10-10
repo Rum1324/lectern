@@ -286,11 +286,13 @@ class Tunnel:
     Adds internet round-trip latency; the phone shows it next to the host name.
     """
 
-    def __init__(self, port):
+    def __init__(self, port, quick=False):
         self.port = port
         self.proc = None
         self.url = None
-        self.named = read_named_tunnel()
+        # quick=True: a random trycloudflare.com URL even where a named tunnel is set up
+        # (menu bar app: Advanced > "Use my fixed address" off).
+        self.named = None if quick else read_named_tunnel()
 
     def setup(self, hostname):
         """One-time: create the named tunnel, route DNS, write the config. Needs a
@@ -639,7 +641,7 @@ class Server:
         self.ctl = Controller(self.backend, self.laser, smooth=not args.no_smooth)
         self.token = self._load_token()
         self.clients = set()
-        self.tunnel = Tunnel(args.port) if args.tunnel else None
+        self.tunnel = Tunnel(args.port, getattr(args, "quick_tunnel", False)) if args.tunnel else None
 
     def _load_token(self):
         if self.args.token:
@@ -924,6 +926,8 @@ def main():
     ap.add_argument("--tunnel", action="store_true",
                     help="expose over a Cloudflare tunnel (for Wi-Fi that isolates clients); "
                          "named if --tunnel-setup was run, else a quick tunnel")
+    ap.add_argument("--quick-tunnel", action="store_true",
+                    help="with --tunnel: use a quick tunnel even if --tunnel-setup was run")
     ap.add_argument("--tunnel-setup", metavar="HOSTNAME",
                     help="one-time: create named tunnel 'lectern' routed to HOSTNAME (needs "
                          "`cloudflared tunnel login` first), then exit")

@@ -249,6 +249,9 @@ class TunnelTest(unittest.TestCase):
                          "https://quiet-river-tulip-sky.trycloudflare.com")
         self.assertIsNone(self.lectern.parse_tunnel_url("INF Registered tunnel connection"))
 
+    def test_quick_flag_ignores_named_tunnel(self):
+        self.assertIsNone(self.lectern.Tunnel(1, quick=True).named)
+
     def test_tunnel_url_comes_first_in_pairing_urls(self):
         import argparse
         a = argparse.Namespace(port=1, token="K", dry_run=True, host="0.0.0.0",

@@ -15,6 +15,8 @@ final class LecternApp: NSObject, NSApplicationDelegate {
     private let tunnelItem = NSMenuItem(title: "Use tunnel (campus Wi-Fi)", action: #selector(toggleTunnel), keyEquivalent: "")
     private let logItem = NSMenuItem(title: "Open log", action: #selector(openLog), keyEquivalent: "")
     private let phoneItem = NSMenuItem(title: "", action: #selector(phoneClicked), keyEquivalent: "")
+    private let fixedItem = NSMenuItem(title: "Use my fixed address", action: #selector(toggleFixed), keyEquivalent: "")
+    private let advancedItem = NSMenuItem(title: "Advanced", action: nil, keyEquivalent: "")
     private let phoneLink = PhoneLink()
     private var proc: Process?
     private var restartAfterStop = false
@@ -25,6 +27,19 @@ final class LecternApp: NSObject, NSApplicationDelegate {
     private var useTunnel: Bool {
         get { UserDefaults.standard.object(forKey: "tunnel") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "tunnel") }
+    }
+
+    /// Named tunnel from `lectern.py --tunnel-setup` (fixed https address), if this Mac has one.
+    private var fixedHost: String? {
+        guard let text = try? String(contentsOfFile: NSHomeDirectory() + "/.config/lectern/tunnel.yml", encoding: .utf8),
+              let r = text.range(of: #"hostname:\s*(\S+)"#, options: .regularExpression) else { return nil }
+        return String(text[r]).components(separatedBy: CharacterSet.whitespaces).last
+    }
+
+    /// Off: a random quick-tunnel address even though a fixed one is set up (what new users get).
+    private var useFixed: Bool {
+        get { UserDefaults.standard.object(forKey: "fixedAddress") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "fixedAddress") }
     }
 
     func applicationDidFinishLaunching(_ note: Notification) {
@@ -39,11 +54,15 @@ final class LecternApp: NSObject, NSApplicationDelegate {
         let quit = NSMenuItem(title: "Quit Lectern", action: #selector(quitApp), keyEquivalent: "q")
         statusLine.isEnabled = false
         for m in [statusLine, .separator(), startStop, qrItem, axItem, .separator(),
-                  phoneItem, .separator(), tunnelItem, logItem, .separator(), quit] {
+                  phoneItem, .separator(), tunnelItem, advancedItem, logItem, .separator(), quit] {
             m.target = self
             menu.addItem(m)
         }
         axItem.isHidden = true
+        let advanced = NSMenu()
+        fixedItem.target = self
+        advanced.addItem(fixedItem)
+        advancedItem.submenu = advanced
         item.menu = menu
         try? FileManager.default.createDirectory(atPath: (logPath as NSString).deletingLastPathComponent,
                                                  withIntermediateDirectories: true)
@@ -72,6 +91,7 @@ final class LecternApp: NSObject, NSApplicationDelegate {
         p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         var args = ["-u", res + "/lectern.py", "--no-browser", "--port", String(port)]
         if useTunnel { args.append("--tunnel") }
+        if useTunnel && fixedHost != nil && !useFixed { args.append("--quick-tunnel") }
         p.arguments = args
         p.currentDirectoryURL = URL(fileURLWithPath: res)
         let pipe = Pipe()
@@ -136,6 +156,11 @@ final class LecternApp: NSObject, NSApplicationDelegate {
         startStop.title = running ? "Stop" : "Start"
         qrItem.isEnabled = running
         tunnelItem.state = useTunnel ? .on : .off
+        let host = fixedHost
+        advancedItem.isHidden = host == nil
+        fixedItem.title = "Use my fixed address (\(host ?? ""))"
+        fixedItem.state = useFixed ? .on : .off
+        fixedItem.isEnabled = useTunnel
         switch phoneLink.phones {
         case nil: phoneItem.title = "Bluetooth phone: grant Input Monitoring…"
         case 0?: phoneItem.title = "Bluetooth phone: not connected"
@@ -153,6 +178,12 @@ final class LecternApp: NSObject, NSApplicationDelegate {
 
     @objc private func toggleTunnel() {
         useTunnel.toggle()
+        render()
+        if proc != nil { restartAfterStop = true; stop() }
+    }
+
+    @objc private func toggleFixed() {
+        useFixed.toggle()
         render()
         if proc != nil { restartAfterStop = true; stop() }
     }
