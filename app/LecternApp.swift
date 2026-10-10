@@ -1,6 +1,7 @@
 // Lectern menu bar app: a thin launcher for lectern.py.
 // Starts/stops the Python server, shows its public address, toggles the Cloudflare tunnel
 // (default on, for networks that isolate clients), opens the pairing QR page.
+// Also hosts PhoneLink, the helper for the Android app's Bluetooth mode (smooth scroll, laser).
 // Built by build-app.sh with swiftc; no Xcode project, no dependencies.
 import Cocoa
 
@@ -13,6 +14,8 @@ final class LecternApp: NSObject, NSApplicationDelegate {
     private let axItem = NSMenuItem(title: "Grant Accessibility…", action: #selector(openAccessibility), keyEquivalent: "")
     private let tunnelItem = NSMenuItem(title: "Use tunnel (campus Wi-Fi)", action: #selector(toggleTunnel), keyEquivalent: "")
     private let logItem = NSMenuItem(title: "Open log", action: #selector(openLog), keyEquivalent: "")
+    private let phoneItem = NSMenuItem(title: "", action: #selector(phoneClicked), keyEquivalent: "")
+    private let phoneLink = PhoneLink()
     private var proc: Process?
     private var restartAfterStop = false
     private var pending = ""
@@ -36,7 +39,7 @@ final class LecternApp: NSObject, NSApplicationDelegate {
         let quit = NSMenuItem(title: "Quit Lectern", action: #selector(quitApp), keyEquivalent: "q")
         statusLine.isEnabled = false
         for m in [statusLine, .separator(), startStop, qrItem, axItem, .separator(),
-                  tunnelItem, logItem, .separator(), quit] {
+                  phoneItem, .separator(), tunnelItem, logItem, .separator(), quit] {
             m.target = self
             menu.addItem(m)
         }
@@ -44,6 +47,8 @@ final class LecternApp: NSObject, NSApplicationDelegate {
         item.menu = menu
         try? FileManager.default.createDirectory(atPath: (logPath as NSString).deletingLastPathComponent,
                                                  withIntermediateDirectories: true)
+        phoneLink.onChange = { [weak self] in self?.render() }
+        phoneLink.start()
         render()
         start()
     }
@@ -131,6 +136,13 @@ final class LecternApp: NSObject, NSApplicationDelegate {
         startStop.title = running ? "Stop" : "Start"
         qrItem.isEnabled = running
         tunnelItem.state = useTunnel ? .on : .off
+        switch phoneLink.phones {
+        case nil: phoneItem.title = "Bluetooth phone: grant Input Monitoring…"
+        case 0?: phoneItem.title = "Bluetooth phone: not connected"
+        case let n?: phoneItem.title = n == 1 ? "Bluetooth phone: connected (smooth scroll, laser)"
+                                              : "Bluetooth phones: \(n) connected"
+        }
+        phoneItem.isEnabled = phoneLink.phones == nil
     }
 
     // MARK: actions
@@ -154,6 +166,10 @@ final class LecternApp: NSObject, NSApplicationDelegate {
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
     }
 
+    @objc private func phoneClicked() {
+        phoneLink.requestAccess()
+    }
+
     @objc private func openLog() {
         NSWorkspace.shared.open(URL(fileURLWithPath: logPath))
     }
@@ -162,9 +178,3 @@ final class LecternApp: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 }
-
-let app = NSApplication.shared
-let delegate = LecternApp()
-app.delegate = delegate
-app.setActivationPolicy(.accessory)
-app.run()

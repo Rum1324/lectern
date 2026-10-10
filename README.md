@@ -1,6 +1,9 @@
 # Lectern
 
-Phone-as-trackpad and presentation remote for macOS. No app install on the phone, no pip install on the Mac.
+Phone-as-trackpad and presentation remote for macOS. Two ways in:
+
+- **Web page** (any phone, iPhone included): no app install on the phone, no pip install on the Mac. Needs the phone and Mac to reach each other over Wi-Fi, or the Cloudflare tunnel.
+- **Android app over Bluetooth** (Android 9+): the phone becomes a Bluetooth mouse and keyboard. No Wi-Fi, no tunnel, nothing required on the Mac. See [Android app](#android-app-bluetooth).
 
 ## Start (Mac)
 
@@ -31,6 +34,32 @@ python3 lectern.py --tunnel   # through Cloudflare, for networks that isolate cl
 3. If macOS asks whether python3 may accept incoming connections, allow it.
 4. On the phone: Share → **Add to Home Screen**. The pairing key is in that link and is saved on the Mac in `~/.config/lectern/token`, so you pair once.
 
+## Android app (Bluetooth)
+
+Same screens as the web page, but connected over Bluetooth, so it works on networks that block
+phone-to-Mac traffic and with no network at all.
+
+1. On the phone, download `Lectern-<version>.apk` from the latest release and open it. Android asks
+   once to allow installs from your browser; allow it. (The app is not on the Play Store.)
+2. Open Lectern, allow **Nearby devices**, tap **Make discoverable**.
+3. On the Mac: System Settings → Bluetooth → **Connect** next to the phone, confirm the code on both.
+
+From then on, opening Lectern reconnects by itself. A notification stays up while it is active, so
+Android doesn't kill it in the background; tap **Stop** there (or swipe Lectern away) to disconnect.
+
+**Optional, on the Mac: the menu bar app as helper.** With `Lectern.app` running, the phone shows
+"Mac helper" and scrolling is smooth pixel scrolling, the laser draws a dot, Silence works. Without
+it, the phone still works as a plain mouse: scrolling falls back to mouse-wheel steps (macOS makes
+those choppy) and the laser area moves the pointer. The helper needs **Input Monitoring** for
+Lectern.app (System Settings → Privacy & Security → Input Monitoring; use **+** if it isn't
+listed) in addition to Accessibility. The helper and the phone find each other on their own.
+
+If the Mac shows the phone connected but nothing moves: in Lectern, Settings → Bluetooth →
+Devices, tap your Mac (reconnects). If that fails, disconnect the phone in the Mac's Bluetooth
+settings and pick the Mac again. After updating to a version whose release notes say "re-pair":
+Forget the phone on the Mac, unpair the Mac on the phone, and pair again (the Mac caches the
+phone's device description).
+
 ## Install as an app (Android Chrome)
 
 Over a fixed HTTPS address (see the tunnel setup under Limits), Chrome offers to install the page: open the QR link once, then menu ⋮ → **Install app** (or **Add to Home screen**). The pairing key is kept on the phone, so the installed app opens straight to the trackpad. Over plain LAN http, "Add to Home screen" still works but is a bookmark, not an install.
@@ -53,7 +82,7 @@ Present tab: Back / Next (arrow keys), laser (hold and drag), Blank (`B`, works 
 - **Direct connection by default.** Networks with client isolation (many campus and hotel networks) block phone → Mac traffic. Two ways around it:
   - Tunnel (works on any network, adds internet round-trip delay): `python3 lectern.py --tunnel`. It uses `cloudflared` from Homebrew if present, otherwise downloads it once into `~/.config/lectern/`. Without setup the QR carries an `https://….trycloudflare.com` address that changes every run. With a domain on Cloudflare, run once `cloudflared tunnel login` and `python3 lectern.py --tunnel-setup lectern.yourdomain.com`; the address is then fixed and the phone can install the page as an app.
   - Phone hotspot: join the Mac to your phone's hotspot; the default QR then works.
-- Bluetooth is not possible from a web page.
+- Bluetooth is not possible from a web page; use the [Android app](#android-app-bluetooth). iPhones can't act as Bluetooth mice for apps, so iPhone stays on the web page.
 - **Laser** is drawn by `laser.swift`, compiled once with `swiftc` (ships with Xcode Command Line Tools). Without `swiftc`, the laser moves the cursor instead.
 - **Silence** runs a Shortcut named `Lectern Focus`, because macOS has no command-line switch for Do Not Disturb. Create it in Shortcuts: *Set Focus → Do Not Disturb → Toggle*.
 - Wake Lock needs HTTPS; the page keeps the phone awake with a 1.5 kB looping muted video instead.

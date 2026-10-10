@@ -75,6 +75,7 @@
   .row{display:grid;gap:10px;flex:none}
   .row.two{grid-template-columns:1fr 1fr;height:58px}
   .row.vol{grid-template-columns:58px 1fr 58px;height:58px;align-items:stretch}
+  .row.keys{grid-template-columns:1fr 1fr;height:52px}
   .small{border-radius:18px;background:var(--surface);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600;touch-action:none}
   .small svg{width:20px;height:20px}
   .level{border-radius:18px;background:var(--surface);border:1px solid var(--line);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;font-weight:600;font-variant-numeric:tabular-nums}
@@ -99,9 +100,23 @@
   .field input[type=checkbox]{width:22px;height:22px;accent-color:var(--accent)}
   .field .val{width:34px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
   .help{color:var(--muted);font-size:12.5px;line-height:1.55;margin:14px 0 0}
-  .gate{position:fixed;inset:0;background:var(--bg);display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px;gap:10px;z-index:30}
+  .gate{position:fixed;inset:0;background:var(--bg);display:none;flex-direction:column;align-items:center;justify-content:safe center;text-align:center;
+    padding:calc(env(safe-area-inset-top) + 24px) 30px calc(env(safe-area-inset-bottom) + 24px);gap:10px;z-index:30;overflow-y:auto}
   .gate.show{display:flex}
   .gate h2{margin:0;font-size:22px}.gate p{margin:0;color:var(--muted);max-width:300px}
+  /* Android app (Bluetooth HID): the page runs in a WebView with window.LecternNative */
+  .native-only{display:none !important}
+  body.native .native-only{display:block !important}
+  body.native .devs.native-only,body.native .field.native-only,body.native .cta.native-only{display:flex !important}
+  body.native .web-only{display:none !important}
+  .devs{flex-direction:column;gap:8px;width:100%;max-width:320px;margin-top:8px}
+  .devs button{height:50px;border-radius:14px;background:var(--surface);border:1px solid var(--line);font-weight:600;padding:0 16px;text-align:left;display:flex;align-items:center;gap:10px}
+  .devs button.cur{border-color:var(--ok)}
+  .devs small{color:var(--muted);font-weight:500;margin-left:auto}
+  .cta{height:50px;border-radius:14px;background:var(--accent);color:#fff;font-weight:600;padding:0 22px;align-items:center;justify-content:center;margin-top:6px}
+  .gate .gstat{font-size:13px;min-height:18px}
+  .gate .link{color:var(--muted);font-size:14px;padding:10px;margin-top:4px}
+  .field .fbtn{padding:8px 14px;border-radius:10px;background:var(--surface2);font-weight:600}
   video{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none}
 </style>
 </head>
@@ -129,6 +144,14 @@
       <button class="mbtn" data-btn="left">Left</button>
       <button class="mbtn" data-btn="right">Right</button>
     </div>
+    <div class="row keys">
+      <button class="small" data-key="backspace">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 6H9l-6 6 6 6h12z"/><path d="M13 10l4 4M17 10l-4 4"/></svg>Backspace
+      </button>
+      <button class="small" data-key="enter">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 5v7a3 3 0 0 1-3 3H5"/><path d="M9 11l-4 4 4 4"/></svg>Enter
+      </button>
+    </div>
   </section>
 
   <section class="view" id="view-present">
@@ -142,7 +165,7 @@
         <small>Next</small>
       </button>
     </div>
-    <div class="laser" id="laser"><span class="ldot"></span><span id="laserText">Hold and drag for laser</span></div>
+    <div class="laser" id="laser"><span class="ldot"></span><span id="laserText"></span></div>
     <div class="row two">
       <button class="small" data-key="b">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8"/><path d="M3 5l18 12" opacity=".6"/></svg>Blank
@@ -168,12 +191,21 @@
     <div class="field"><label>Scroll speed</label><input type="range" id="sScr" min="0.3" max="4" step="0.1"><span class="val" id="vScr"></span></div>
     <div class="field"><label>Laser speed</label><input type="range" id="sLas" min="1" max="6" step="0.1"><span class="val" id="vLas"></span></div>
     <div class="field"><label>Natural scrolling</label><input type="checkbox" id="sNat"></div>
-    <p class="help">Install this page as an app (Chrome menu → Install app, or Share → Add to Home Screen) to keep the pairing and open it full-screen.<br>Silence runs a Shortcut named “Lectern Focus” on the Mac.</p>
+    <div class="field native-only"><label>Bluetooth</label><button class="fbtn" id="btOpen">Devices</button></div>
+    <p class="help native-only">Lectern is connected to your Mac as a Bluetooth mouse and keyboard, so nothing needs to run on the Mac. With the Lectern app running on the Mac (“Mac helper” at the top), scrolling is smooth and the laser draws a dot; without it, scrolling uses mouse-wheel steps and the laser area moves the pointer.</p>
+    <p class="help web-only">Install this page as an app (Chrome menu → Install app, or Share → Add to Home Screen) to keep the pairing and open it full-screen.<br>Silence runs a Shortcut named “Lectern Focus” on the Mac.</p>
   </div>
 
   <div class="gate" id="gate">
-    <h2>Not paired</h2>
-    <p>Run <b>lectern.py</b> on your Mac and scan the QR code it shows.</p>
+    <h2 class="web-only">Not paired</h2>
+    <p class="web-only">Run <b>lectern.py</b> on your Mac and scan the QR code it shows.</p>
+    <h2 class="native-only">Connect to your Mac</h2>
+    <p class="native-only">First time: tap <b>Make discoverable</b>, then on the Mac open System Settings → Bluetooth and click Connect next to this phone. Already paired? Pick your Mac.</p>
+    <p class="native-only" style="font-size:13px">Mac won’t take it? On the Mac, Bluetooth → this phone → Disconnect, then pick your Mac again.</p>
+    <p class="native-only gstat" id="gstat"></p>
+    <div class="devs native-only" id="devs"></div>
+    <button class="cta native-only" id="discover">Make discoverable</button>
+    <button class="link native-only" id="gateClose">Close</button>
   </div>
   <div class="toast" id="toast"></div>
   <video id="awake" muted playsinline loop src="data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMxbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAB9AAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAlt0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAB9AAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAfQAAAAAAABAAAAAAHTbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAgABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABfm1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAT5zdGJsAAAAvnN0c2QAAAAAAAAAAQAAAK5hdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAANGF2Y0MBZAAK/+EAF2dkAAqs2V7ARAAAAwAEAAADAAg8SJZYAQAGaOvjyyLA/fj4AAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAAAtEAAALRAAAABhzdHRzAAAAAAAAAAEAAAACAABAAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAACAAAAAQAAABxzdHN6AAAAAAAAAAAAAAACAAACxQAAAAwAAAAUc3RjbwAAAAAAAAABAAADYQAAAGJ1ZHRhAAAAWm1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALWlsc3QAAAAlqXRvbwAAAB1kYXRhAAAAAQAAAABMYXZmNjAuMTYuMTAwAAAACGZyZWUAAALZbWRhdAAAAq0GBf//qdxF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjQgcjMxMDggMzFlMTlmOSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjMgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0xIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDM6MHgxMTMgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTEgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MyBiX3B5cmFtaWQ9MiBiX2FkYXB0PTEgYl9iaWFzPTAgZGlyZWN0PTEgd2VpZ2h0Yj0xIG9wZW5fZ29wPTAgd2VpZ2h0cD0yIGtleWludD0yNTAga2V5aW50X21pbj0xIHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1idHJlZT0xIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCBpcF9yYXRpbz0xLjQwIGFxPTE6MS4wMACAAAAAEGWIhAAW//730z/MsuyaJYEAAAAIQZohbEFf/vA="></video>
@@ -182,6 +214,10 @@
 (() => {
   "use strict";
   const $ = (s) => document.querySelector(s);
+  // Android app: the page runs in a WebView and talks to the phone's Bluetooth HID code through
+  // window.LecternNative (same JSON messages as the WebSocket) instead of the Mac server.
+  const N = window.LecternNative || null;
+  if (N) document.body.classList.add("native");
 
   // ---------- settings
   // v: bump when a default changes, so phones that saved the old defaults pick up the new one.
@@ -203,15 +239,18 @@
   $("#sheetBg").onclick = () => openSheet(false);
 
   // ---------- pairing key
-  const params = new URLSearchParams(location.search);
-  let key = params.get("k");
-  try {
-    if (key) localStorage.setItem("lectern.k", key); else key = localStorage.getItem("lectern.k");
-  } catch (e) {}
-  if (!key) { $("#gate").classList.add("show"); return; }
-  // Manifest is served only with the key, and its start_url carries the key, so the installed
-  // app pairs even if this origin's storage is empty when it launches.
-  { const l = document.createElement("link"); l.rel = "manifest"; l.href = "/manifest.webmanifest?k=" + encodeURIComponent(key); document.head.appendChild(l); }
+  let key = null;
+  if (!N) {
+    const params = new URLSearchParams(location.search);
+    key = params.get("k");
+    try {
+      if (key) localStorage.setItem("lectern.k", key); else key = localStorage.getItem("lectern.k");
+    } catch (e) {}
+    if (!key) { $("#gate").classList.add("show"); return; }
+    // Manifest is served only with the key, and its start_url carries the key, so the installed
+    // app pairs even if this origin's storage is empty when it launches.
+    { const l = document.createElement("link"); l.rel = "manifest"; l.href = "/manifest.webmanifest?k=" + encodeURIComponent(key); document.head.appendChild(l); }
+  }
 
   // ---------- connection
   let ws = null, backoff = 400, pingTimer = null, pingSent = 0;
@@ -228,6 +267,16 @@
     };
     ws.onmessage = (e) => {
       let m; try { m = JSON.parse(e.data); } catch (_) { return; }
+      handle(m);
+    };
+    ws.onclose = () => {
+      clearInterval(pingTimer); dot.className = "dot"; lat.textContent = "";
+      host.textContent = "Reconnecting…";
+      setTimeout(connect, backoff); backoff = Math.min(backoff * 1.8, 4000);
+    };
+    ws.onerror = () => { try { ws.close(); } catch (_) {} };
+  }
+  function handle(m) {
       if (m.t === "hello") {
         host.textContent = m.host.replace(/\.local$/, "");
         const b = $("#banner");
@@ -242,28 +291,59 @@
         $("#wave").style.display = m.muted ? "none" : "";
       } else if (m.t === "note") {
         toast(m.text);
+      } else if (m.t === "bt") {
+        btState(m);
       }
-    };
-    ws.onclose = () => {
-      clearInterval(pingTimer); dot.className = "dot"; lat.textContent = "";
-      host.textContent = "Reconnecting…";
-      setTimeout(connect, backoff); backoff = Math.min(backoff * 1.8, 4000);
-    };
-    ws.onerror = () => { try { ws.close(); } catch (_) {} };
   }
-  const send = (o) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
-  connect();
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && (!ws || ws.readyState > 1)) { backoff = 400; connect(); }
-  });
+  const send = N ? (o) => N.post(JSON.stringify(o))
+                 : (o) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+  if (!N) {
+    connect();
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && (!ws || ws.readyState > 1)) { backoff = 400; connect(); }
+    });
+  }
+
+  // ---------- Android app: Bluetooth state and device picker
+  let gateTimer = null;
+  let helper = false; // Lectern.app is running on the Mac: smooth scroll and a real laser dot
+  function btState(m) {
+    const on = m.state === "connected";
+    dot.className = "dot" + (on ? " on" : m.state === "connecting" ? " wait" : "");
+    host.textContent = on ? m.host : m.state === "connecting" ? "Connecting…" : "Not connected";
+    helper = on && !!m.helper;
+    lat.textContent = helper ? "Mac helper" : "";
+    if (!lp) $("#laserText").textContent = laserIdle();
+    $("#gstat").textContent = on ? "" : (m.text || "");
+    const devs = $("#devs"); devs.textContent = "";
+    for (const d of m.devices || []) {
+      const b = document.createElement("button");
+      b.textContent = d.name;
+      if (d.addr === m.hostAddr) { b.className = "cur"; const s = document.createElement("small"); s.textContent = on ? "Connected" : "Last used"; b.appendChild(s); }
+      b.onclick = () => N.connect(d.addr);
+      devs.appendChild(b);
+    }
+    clearTimeout(gateTimer);
+    if (on) { $("#gate").classList.remove("show"); return; }
+    // A saved Mac usually reconnects within a second or two; don't flash the picker at launch.
+    gateTimer = setTimeout(() => $("#gate").classList.add("show"), m.saved ? 2500 : 0);
+  }
+  if (N) {
+    $("#discover").onclick = () => N.discoverable();
+    $("#gateClose").onclick = () => { clearTimeout(gateTimer); $("#gate").classList.remove("show"); };
+    $("#btOpen").onclick = () => { openSheet(false); $("#gate").classList.add("show"); };
+    $("#lvl").textContent = "Mute";
+    window.lecternRecv = handle;
+    N.ready();
+  }
 
   // ---------- installable app: the service worker needs HTTPS (the tunnel); plain LAN http skips it
-  if (window.isSecureContext && navigator.serviceWorker) {
+  if (!N && window.isSecureContext && navigator.serviceWorker) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   }
 
   // ---------- keep the phone awake (Wake Lock needs HTTPS; the muted looping video works over HTTP)
-  let awakeOn = false;
+  let awakeOn = !!N; // the Android app keeps the screen on itself
   document.addEventListener("touchstart", () => {
     if (awakeOn) return; awakeOn = true;
     const v = $("#awake"); const p = v.play(); if (p && p.catch) p.catch(() => { awakeOn = false; });
@@ -292,7 +372,9 @@
     if (acc.l) { send({ t: "laser", dx: +acc.lx.toFixed(2), dy: +acc.ly.toFixed(2) }); acc.lx = acc.ly = 0; acc.l = false; }
   }
   const queue = () => { if (!rafQueued) { rafQueued = true; requestAnimationFrame(flush); } };
-  const gain = (dist, dt) => { const v = dist / Math.max(dt, 1); return S.ptr * (0.6 + 1.6 * Math.min(v, 2.2)); };
+  // Over Bluetooth the Mac applies its own mouse acceleration, so the Android app sends linear deltas.
+  const gain = N ? () => S.ptr / 1.6
+                 : (dist, dt) => { const v = dist / Math.max(dt, 1); return S.ptr * (0.6 + 1.6 * Math.min(v, 2.2)); };
 
   // ---------- trackpad gestures
   const pad = $("#pad");
@@ -405,9 +487,11 @@
 
   // ---------- laser
   const laser = $("#laser"); let lp = null;
+  const laserIdle = () => (N && !helper) ? "Hold and drag to point" : "Hold and drag for laser";
+  $("#laserText").textContent = laserIdle();
   laser.addEventListener("touchstart", (e) => {
     e.preventDefault(); const t = e.targetTouches[0]; lp = [t.clientX, t.clientY];
-    laser.classList.add("on"); $("#laserText").textContent = "Laser on";
+    laser.classList.add("on"); $("#laserText").textContent = (N && !helper) ? "Pointing" : "Laser on";
     acc.l = true; queue();
   }, { passive: false });
   laser.addEventListener("touchmove", (e) => {
@@ -416,7 +500,7 @@
   }, { passive: false });
   const laserEnd = (e) => {
     e.preventDefault(); if (e.targetTouches.length) return; lp = null;
-    laser.classList.remove("on"); $("#laserText").textContent = "Hold and drag for laser";
+    laser.classList.remove("on"); $("#laserText").textContent = laserIdle();
     flush(); send({ t: "laser", on: false });
   };
   laser.addEventListener("touchend", laserEnd, { passive: false });

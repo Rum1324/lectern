@@ -48,13 +48,43 @@ web/manifest.webmanifest  makes the page installable ("Install app") on Android 
 web/sw.js         service worker: caches only the app shell (/, manifest, icons); never /ws
 web/icon.png      home-screen icon (original); icon-192/512.png are sips resizes of it
 start.command     double-click launcher (terminal)
-app/              menu bar app: LecternApp.swift (thin launcher for lectern.py) + Info.plist
+app/              menu bar app: main.swift, LecternApp.swift (launcher for lectern.py),
+                  PhoneLink.swift (Bluetooth helper for the Android app), Info.plist
 build-app.sh      builds dist/Lectern.app (universal) with swiftc/sips/iconutil
 make-signing-cert.sh  one-time self-signed code-signing identity so rebuilds keep Accessibility
 tests/            protocol + UI tests (see above)
+android/          Bluetooth HID app (Kotlin, no AndroidX): HidPeripheral.kt (descriptor,
+                  register/connect, paced reports), MainActivity.kt (WebView hosting
+                  web/index.html + JS bridge). See backlog 3.
 ```
 
+## Releases
+
+GitHub releases on Rum1324/lectern (public repo: keep hostnames, device names/addresses, domains
+out of commits). Assets: `Lectern.app.zip` (`./build-app.sh`, then `ditto -c -k --keepParent
+dist/Lectern.app`) and `Lectern-<ver>.apk` (`cd android && ./gradlew assembleRelease`). The APK
+release key is `~/.config/lectern/android-release.jks`, passwords in
+`~/.config/lectern/android-signing.properties` (both mode 600, never in the repo; back them up:
+losing the key means users must uninstall to update). Debug builds (adb) are signed with the
+machine's debug key and can't update a release install, or vice versa: uninstall first.
+Versions: v0.1.0 web + menu bar app; v0.5.0 Android Bluetooth app + Mac helper (2026-10-09).
+
 ## Menu bar app
+
+**Bluetooth helper (PhoneLink.swift, 2026-10-09).** Lectern.app also serves the Android app's
+Bluetooth mode. The phone's HID descriptor has a vendor collection (page 0xFF00): input report 4
+(8 bytes: type 1 scroll / 2 laser / 3 laser hide / 4 focus, int16 quarter units) and output report
+5 (heartbeat the helper sends every 1 s via IOHIDDeviceSetReport; **the buffer must start with
+the report ID**, else Android sees report 1). The phone uses report 4 only while heartbeats arrive
+(2.5 s timeout), so with Lectern.app quit it falls back to wheel notches / pointer laser.
+Helper ports lectern.py's Pacer (120 Hz, alpha 0.5), posts the same pixel scroll events, draws
+laser.swift's dot in-process. Needs Input Monitoring (device includes a keyboard) besides
+Accessibility; the app requests it at launch, else add it with "+" in Privacy → Input Monitoring.
+Verified 2026-10-09: helper scroll exactly 1.00 px/px at all speeds; laser dot at level 1000,
+hides on release; quit → phone falls back within ~3 s; relaunch → back. Changing the descriptor
+needs re-pairing (Mac: Forget; phone: Unpair; pair again): the Mac caches it.
+Rebuild + reinstall kept both TCC grants (designated requirement is the "Lectern Dev" certificate
+leaf, not the cdhash): checked by behaviour, not assumed.
 
 `Lectern.app` runs `/usr/bin/python3 -u lectern.py --no-browser --port 8765 [--tunnel]` from its
 Resources folder, parses the server's stdout for the address and the Accessibility warning,
@@ -154,12 +184,61 @@ Details that are easy to break:
    Cloudflare caches `.js` by extension at the edge; a 530 served during the misroute stayed
    cached for `/sw.js` for a while (cache-busted URL was fine). If "Install app" doesn't
    appear, check `curl -I https://lectern.<your-domain>/sw.js` is 200.
-3. **Android Bluetooth HID app** (Sota wants to explore this, decided 2026-10-07; start when he
-   says so). Android 9+ `BluetoothHidDevice` makes the phone a Bluetooth mouse+keyboard: no Mac
-   software, no network, no Cloudflare. Loses the laser overlay and the volume readout
-   (consumer-control volume keys still possible). Needs Android Studio/Kotlin. Open questions to
-   settle first: keep the web app as the UI inside a WebView, or rebuild the UI natively; whether
-   macOS accepts a phone as a HID mouse without pairing quirks; how Blank/`B` and the laser map.
+3. **Android Bluetooth HID app** (started 2026-10-09). Android 9+ `BluetoothHidDevice` makes the
+   phone a Bluetooth mouse+keyboard: no Mac software, no network, no Cloudflare.
+   Decided by Sota (2026-10-09): the native Android app is the whole product for this mode;
+   the laser needs a dedicated Mac app, run only when a laser is wanted (`B` is just a key).
+   App in `android/` (Homebrew `android-commandlinetools` SDK at
+   /opt/homebrew/share/android-commandlinetools, Gradle 9.8.1, AGP 9.4.1; no Android Studio).
+   **UI = web/index.html in a WebView** (Sota chose "port the web app's look", 2026-10-09): the
+   build copies it into assets; the page sees `window.LecternNative` and sends the same JSON
+   messages through it instead of the WebSocket (`body.native`, `.native-only`/`.web-only`).
+   In native mode: linear pointer gain (the Mac accelerates HID mice itself), Bluetooth device
+   picker in the gate, laser area moves the pointer, Silence shows a toast. Don't pad the WebView
+   natively: it already passes system-bar insets to `env(safe-area-inset-*)`.
+   HID: combo descriptor (report 1 keyboard, 2 mouse int16 X/Y + wheel + AC Pan, 3 consumer
+   volume). `HidPeripheral` paces movement: backlog drained every 7.5 ms, alpha 0.5.
+   Build: `cd android && ./gradlew assembleDebug`; install: `adb install -r
+   app/build/outputs/apk/debug/app-debug.apk`. Debug hook: `am start -n
+   com.lectern.hid/.MainActivity --ei tickUs 5000` overrides the tick.
+   Verified on Sota's Xiaomi 14 Ultra (Android 16) + Mac, 2026-10-09: pairs from the Mac
+   (System Settings → Bluetooth → Connect), pointer/click/keys work, the app reconnects by itself
+   after restarts (6/6 since; one early phone-initiated reconnect showed "connected" on both
+   sides but delivered no input, cause unknown, fixed by clicking Connect on the Mac).
+   Smoothness, measured with a Mac-side cursor poller + `adb shell input swipe`: the Mac holds
+   the link in sniff mode at 7.5-10 ms, so per-touch-event sending (60 Hz) gave 51-77% frozen
+   120 Hz frames; paced 7.5 ms gives ~20-30%. A2DP earphones on the Mac share the radio: Sota's
+   earphones stutter while the cursor moves, and 5 ms ticks were erratic with audio on.
+   Sota confirmed on the phone (2026-10-09): everything works as planned, except scroll feel.
+   **Scroll** (fixed 2026-10-09, measured, awaiting Sota's feel test): macOS accelerates wheel
+   notches by rate. Measured model (tools/tick_trace.py): a notch >150 ms after the previous one
+   = 1 px and resets; otherwise the Mac keeps an EMA of notch spacing (weight 0.24, start 150 ms)
+   and a notch = STEADY_PX(EMA), ~10 px at 150 ms to ~94 px at 12 ms. `HidPeripheral.Axis` runs
+   that model, backlog in Mac px (1 CSS px -> 1 Mac px; Scroll speed applies in the page), sends a
+   notch when backlog >= half the prediction; MODEL_GAIN 1.15 from closed-loop checks. Result:
+   0.8x..10x before -> ~1.0-1.1 from 1.5 CSS px/frame up. Below that macOS has nothing between
+   1 px and ~10 px notches, so very slow scrolling stays coarse. Curve depends on the Mac's
+   scroll-speed setting. HID Resolution Multiplier (hi-res wheel) untested on macOS; would need
+   re-pairing (the Mac caches the descriptor).
+   Tools in `android/tools/` (Mac side, phone on adb, Lectern open and connected; keep hands off
+   the Mac's trackpad): `cursor_probe.py` (pointer smoothness via `adb shell input swipe`),
+   `scroll_curve.py` (Mac px out per CSS px in; target flat ~1), `tick_curve.py` / `tick_trace.py`
+   (raw notches via bridge message `rawwheel`: px per notch, notch-by-notch ramp). They drive the
+   page with Playwright over `adb forward` to `webview_devtools_remote_<pid>` and read scroll
+   events with a listen-only event tap.
+   **Connection lifecycle** (learned the hard way, 2026-10-09):
+   - `registerApp` fails unless the app is foreground ("failed because the app is not
+     foreground"), e.g. launched over the lock screen; `start()` is retried on every resume.
+   - Process killed without unregistering (Xiaomi kills/freezes background apps) leaves the Mac
+     holding a stale HID link: every reconnect gets "A connection to … already exists" until the
+     phone is disconnected on the Mac. Hence `LecternService` (foreground service, notification
+     with Stop; swiping from Recents stops cleanly) and `Lectern` (process-wide HidPeripheral).
+   - Connecting while the Mac is still closing the previous link (reinstall) gave a link both
+     sides call connected that delivers nothing (the Mac's IOHIDUserDevice LastActivityTimestamp
+     never moves). Fix: wait SETTLE_MS (1.5 s) after registering; tapping the connected Mac in
+     the device list does disconnect + reconnect. Verified: 3 reinstalls + force-stop reconnect.
+   - Failed attempts retry with backoff (4x); a link the Mac closes later is not reopened.
+   Device picker shows only computers (plus the last host). The gate pads for the status bar.
 4. Pacer alpha 0.5 felt right to Sota over the tunnel; revisit only if the network changes.
 5. WebSocket server ignores fragmented frames (fine for this client; harden if reused).
 6. Laser on multi-display setups: verify the Cocoa y-conversion on a secondary display.

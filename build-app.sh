@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds dist/Lectern.app: a menu bar launcher (app/LecternApp.swift) bundling lectern.py,
+# Builds dist/Lectern.app: a menu bar launcher (app/*.swift) bundling lectern.py,
 # laser.swift and web/. Needs only the Xcode Command Line Tools (swiftc, sips, iconutil).
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -8,8 +8,8 @@ rm -rf dist build-tmp
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" build-tmp
 
 echo "compiling (arm64 + x86_64)..."
-swiftc -O -target arm64-apple-macos11 app/LecternApp.swift -o build-tmp/Lectern-arm64
-swiftc -O -target x86_64-apple-macos11 app/LecternApp.swift -o build-tmp/Lectern-x86_64
+swiftc -O -target arm64-apple-macos11 app/main.swift app/LecternApp.swift app/PhoneLink.swift -o build-tmp/Lectern-arm64
+swiftc -O -target x86_64-apple-macos11 app/main.swift app/LecternApp.swift app/PhoneLink.swift -o build-tmp/Lectern-x86_64
 lipo -create build-tmp/Lectern-arm64 build-tmp/Lectern-x86_64 -output "$APP/Contents/MacOS/Lectern"
 
 echo "bundling server..."

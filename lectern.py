@@ -38,7 +38,8 @@ STATIC_TYPES = {".webmanifest": "application/manifest+json", ".js": "text/javasc
                 ".html": "text/html; charset=utf-8"}
 
 # macOS virtual key codes
-KEY = {"right": 124, "left": 123, "down": 125, "up": 126, "b": 11, "esc": 53, "space": 49}
+KEY = {"right": 124, "left": 123, "down": 125, "up": 126, "b": 11, "esc": 53, "space": 49,
+       "enter": 36, "backspace": 51}
 
 
 # --------------------------------------------------------------------------- backends
