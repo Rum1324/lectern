@@ -145,6 +145,10 @@ final class LecternApp: NSObject, NSApplicationDelegate {
             } else if line.hasPrefix("! macOS has not granted Accessibility") {
                 statusLine.title = "Accessibility needed, then Stop and Start"
                 axItem.isHidden = false
+            } else if line.hasPrefix("! network: no LAN address") {
+                statusLine.title = "Local Network permission needed, then Stop and Start"
+                NSWorkspace.shared.open(URL(string:
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork")!)
             } else if line.hasPrefix("! tunnel: no public URL") {
                 statusLine.title = "No tunnel yet (retrying); LAN only"
             }

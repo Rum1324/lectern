@@ -393,7 +393,8 @@ class Tunnel:
         return self.url  # routed late; the phone page retries on its own
 
     async def _drain(self):
-        while await self.proc.stderr.readline():
+        proc = self.proc  # a later close()/start() swaps self.proc; keep draining this one
+        while proc and await proc.stderr.readline():
             pass
 
     def _answers(self):
@@ -863,8 +864,16 @@ class Server:
             if await self.tunnel.start() is None:
                 self._tunnel_failed()
         print("\nLectern is running%s." % (" (dry run: nothing is moved)" if self.dry else ""))
-        for u in self.urls():
+        urls = self.urls()
+        for u in urls:
             print("  open on your phone:", u)
+        if sys.platform == "darwin" and not self.dry and not lan_ips():
+            # No LAN address at all while Wi-Fi is up means macOS is blocking the local network
+            # (Privacy & Security -> Local Network). DNS usually lives there too, so the tunnel
+            # fails as well. Nothing to do in code; the user must flip the switch.
+            print("\n  ! network: no LAN address found. If Wi-Fi is connected, macOS has probably"
+                  "\n    denied Lectern the Local Network permission (System Settings -> Privacy &"
+                  "\n    Security -> Local Network). Turn it on, then Stop and Start.", flush=True)
         if not self.dry and not self.backend.trusted():
             print("\n  ! macOS has not granted Accessibility to this terminal app, so clicks and"
                   "\n    keys will be ignored. Turn it on in the pane that just opened, then"
