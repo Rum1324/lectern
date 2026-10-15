@@ -136,7 +136,7 @@ final class LecternApp: NSObject, NSApplicationDelegate {
         while let nl = pending.firstIndex(of: "\n") {
             let line = String(pending[..<nl]).trimmingCharacters(in: .whitespaces)
             pending = String(pending[pending.index(after: nl)...])
-            if line.hasPrefix("open on your phone: "), statusLine.title.hasPrefix("Start") {
+            if line.hasPrefix("open on your phone: "), !statusLine.title.hasPrefix("Running") {
                 let url = String(line.dropFirst("open on your phone: ".count))
                 let host = URL(string: url)?.host ?? url
                 statusLine.title = "Running · " + host
@@ -146,7 +146,7 @@ final class LecternApp: NSObject, NSApplicationDelegate {
                 statusLine.title = "Accessibility needed, then Stop and Start"
                 axItem.isHidden = false
             } else if line.hasPrefix("! tunnel: no public URL") {
-                statusLine.title = "Tunnel failed (see log); LAN only"
+                statusLine.title = "No tunnel yet (retrying); LAN only"
             }
         }
     }

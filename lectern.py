@@ -837,11 +837,23 @@ class Server:
         return out
 
     def _tunnel_failed(self):
-        """--tunnel was requested but no public URL came up: say so loudly, keep LAN."""
+        """--tunnel was requested but no public URL came up: say so, keep LAN, keep retrying."""
         print("\n  ! tunnel: no public URL after 40 s. The LAN addresses below only work on"
               "\n    networks that let phones talk to laptops (not campus Wi-Fi). Likely causes:"
-              "\n    no internet yet, github.com blocked (cloudflared download), or cloudflared"
-              "\n    crashed. Fix and restart Lectern.\n", flush=True)
+              "\n    no internet yet (e.g. started at login), github.com blocked (cloudflared"
+              "\n    download), or cloudflared crashed. Retrying every 30 s.\n", flush=True)
+        asyncio.ensure_future(self._tunnel_retry())
+
+    async def _tunnel_retry(self):
+        """Started at login the Mac often has no network yet; bring the tunnel up when it does."""
+        while True:
+            await asyncio.sleep(30)
+            self.tunnel.close()
+            if await self.tunnel.start() is not None:
+                print("\n  tunnel: up.", flush=True)
+                for u in self.urls():
+                    print("  open on your phone:", u, flush=True)
+                return
 
     async def run(self):
         srv = await asyncio.start_server(self.handle, self.args.host, self.args.port)
