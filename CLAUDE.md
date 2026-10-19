@@ -11,8 +11,8 @@ Wi-Fi blocks phone→laptop traffic (verified 2026-10-07: run with `--tunnel` th
 
 | Part | Status |
 |---|---|
-| WebSocket protocol, pairing, HTTP serving | tested (`tests/test_protocol.py`, 15 tests, dry-run) |
-| Phone gestures → events | tested (`tests/test_ui.py`, 9 tests, Chromium mobile viewport + CDP touch events) |
+| WebSocket protocol, pairing, HTTP serving | tested (`tests/test_protocol.py`, 17 tests, dry-run) |
+| Phone gestures → events | tested (`tests/test_ui.py`, 10 tests, Chromium mobile viewport + CDP touch events) |
 | CoreGraphics ctypes calls (`MacBackend`) | verified: bounds, position, pointer move, scroll post correctly on Apple Silicon |
 | `laser.swift` overlay | verified: compiles with Xcode swiftc, window lands centred on the requested point at screen-saver level, hides on command |
 | osascript volume, Accessibility check | verified |
@@ -33,7 +33,7 @@ python3 lectern.py --tunnel        # also opens a Cloudflare tunnel; needed on c
 python3 lectern.py --tunnel-setup lectern.<your-domain>   # one-time; needs `cloudflared tunnel login`
 python3 lectern.py --no-smooth     # post events on arrival (compare against the Pacer)
 python3 lectern.py --dry-run       # logs "[dry-run] ..." instead of posting events; any OS
-python3 -m unittest discover -s tests -v   # 25 tests, ~15 s; UI tests skip without Playwright
+python3 -m unittest discover -s tests -v   # 27 tests, ~18 s; UI tests skip without Playwright
 pip install playwright && python3 -m playwright install chromium   # for tests/test_ui.py
 ```
 
@@ -67,7 +67,7 @@ release key is `~/.config/lectern/android-release.jks`, passwords in
 `~/.config/lectern/android-signing.properties` (both mode 600, never in the repo; back them up:
 losing the key means users must uninstall to update). Debug builds (adb) are signed with the
 machine's debug key and can't update a release install, or vice versa: uninstall first.
-Versions: v0.1.0 web + menu bar app; v0.5.0 Android Bluetooth app + Mac helper (2026-10-09).
+Versions: v0.1.0 web + menu bar app; v0.5.0 Android Bluetooth app + Mac helper (2026-10-09); v0.5.1 one-finger scroll wheel (2026-10-19).
 
 ## Menu bar app
 
@@ -150,6 +150,9 @@ Details that are easy to break:
 - Momentum scroll on the phone integrates every frame but sends at most ~20 msgs/s and stops
   at 0.08 px/ms (was ~40 msgs per flick).
 - Gestures use `targetTouches`, so holding the Left button while moving on the pad works.
+- Scroll wheel (Settings → Scroll wheel, `S.whl`, default on): floats in the pad's bottom-right
+  corner as a sibling of `#pad` inside `.padwrap`, so its touches never reach the pad's gestures.
+  One finger, vertical only, same `scrollK()` gain and `glide()` momentum as two-finger scroll.
 - Disconnect releases any held button (`Controller.release_all`).
 - Phone keep-awake: Wake Lock needs HTTPS, so over plain LAN HTTP a 1.5 kB muted looping
   video (base64 in index.html) does the job.
@@ -159,7 +162,7 @@ Details that are easy to break:
 1. Accessibility prompt appears if not granted; after granting + restart, `hello.trusted` is true (no yellow banner on phone).
 2. Pointer moves smoothly; speed feels right at default (Settings sliders: pointer 1.6, scroll 1.0).
 3. Tap = click, tap-tap = double-click (opens a Finder item), two-finger tap = context menu.
-4. Two-finger scroll in Safari/Chrome, momentum stops naturally.
+4. Two-finger scroll in Safari/Chrome, momentum stops naturally; the corner wheel does the same with one finger.
 5. Double-tap-hold drags a Finder window; holding Left + moving also drags.
 6. Keynote / PowerPoint / Google Slides fullscreen: Next/Back, `B` blanks the screen.
 7. Laser: `swiftc` compiles on first launch (look for the compile-failed message); dot shows

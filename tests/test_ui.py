@@ -131,6 +131,44 @@ class UITest(unittest.TestCase):
         self.assertTrue(ev)
         self.assertTrue(all(int(e.split()[2]) < 0 for e in ev), ev)  # fingers up -> wheel < 0
 
+    def test_4b_wheel_scrolls_with_one_finger(self):
+        self.assertTrue(self.page.locator("#wheel").is_visible())  # on by default
+        x, y = self.center("#wheel")
+
+        def drag():  # slow drag, pause before lifting: no momentum
+            self.touch("touchStart", [(x, y)])
+            for i in range(1, 7):
+                self.touch("touchMove", [(x + i * 3, y - i * 10)])  # sideways wobble is ignored
+                time.sleep(0.016)
+            time.sleep(0.15)
+            self.touch("touchEnd", [])
+        ev = self.events(drag)
+        self.assertTrue(ev)
+        self.assertTrue(all(e.startswith("scroll") for e in ev), ev)  # no pointer move, no clicks
+        self.assertTrue(all(e.split()[1] == "0" for e in ev), ev)  # vertical only
+        self.assertEqual(sum(int(e.split()[2]) for e in ev), -60)  # finger up 60 -> wheel -60
+
+        def flick():  # headless Chromium spaces moves ~50 ms apart, so big steps make it a flick
+            self.touch("touchStart", [(x, y)])
+            for i in range(1, 5):
+                self.touch("touchMove", [(x, y - i * 30)])
+                time.sleep(0.016)
+            self.touch("touchEnd", [])
+            time.sleep(0.8)  # momentum
+        total = sum(int(e.split()[2]) for e in self.events(flick) if e.startswith("scroll"))
+        self.assertLess(total, -120 * 1.25)  # glided past the 120 px the finger moved
+
+        def toggle():
+            self.page.locator("#gear").tap()
+            time.sleep(0.3)
+            self.page.locator("#sWhl").tap()
+            self.page.touchscreen.tap(195, 80)  # backdrop closes the sheet
+            time.sleep(0.3)
+        toggle()
+        self.assertFalse(self.page.locator("#wheel").is_visible())
+        toggle()
+        self.assertTrue(self.page.locator("#wheel").is_visible())
+
     def test_5_double_tap_hold_drags(self):
         cx, cy = self.center("#pad")
         time.sleep(0.4)

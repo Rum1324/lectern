@@ -56,6 +56,19 @@
   .touchmark{position:absolute;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;
     background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);pointer-events:none}
   .pad.dragging{border-color:var(--accent)}
+  /* one-finger scroll wheel, floating in the pad's bottom-right corner (Settings → Scroll wheel) */
+  .padwrap{flex:1;display:flex;position:relative;min-height:0}
+  .padwrap .pad{flex:1}
+  .wheel{position:absolute;right:12px;bottom:12px;width:54px;height:112px;border-radius:27px;background:var(--surface2);border:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;padding:6px 0;color:var(--muted);touch-action:none;transition:border-color .15s,color .15s}
+  .wheel[hidden]{display:none}
+  .wheel.down{border-color:var(--accent);color:var(--text)}
+  .wheel svg{width:18px;height:18px;flex:none}
+  .wheel .ridges{flex:1;width:24px;margin:2px 0;border-radius:8px;background:repeating-linear-gradient(to bottom,#4A4A55 0 2px,transparent 2px 8px);
+    -webkit-mask-image:linear-gradient(transparent,#000 30%,#000 70%,transparent);mask-image:linear-gradient(transparent,#000 30%,#000 70%,transparent)}
+  .wheel.down .ridges{background-image:repeating-linear-gradient(to bottom,#6A6A76 0 2px,transparent 2px 8px)}
+  .padwrap.has-wheel .pad .hint{right:72px;left:12px}
+  .whl-hint{display:none}.padwrap.has-wheel .whl-hint{display:inline}
   .mbtns{display:grid;grid-template-columns:1fr 1fr;gap:10px;height:64px;flex:none}
   .mbtn{border-radius:18px;background:var(--surface);border:1px solid var(--line);font-weight:600;color:var(--muted);touch-action:none}
   .mbtn.down,.key.down{background:var(--surface2);color:var(--text);transform:scale(.98)}
@@ -137,8 +150,15 @@
   </div>
 
   <section class="view sel" id="view-pad">
-    <div class="pad" id="pad">
-      <div class="hint">Move with one finger · tap to click<br>Two fingers to scroll · two-finger tap to right-click<br>Double-tap and hold to drag</div>
+    <div class="padwrap" id="padwrap">
+      <div class="pad" id="pad">
+        <div class="hint">Move with one finger · tap to click<br>Two fingers<span class="whl-hint"> or the wheel</span> to scroll<br>Two-finger tap to right-click<br>Double-tap and hold to drag</div>
+      </div>
+      <div class="wheel" id="wheel" role="img" aria-label="Scroll wheel: drag up or down to scroll">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 14l5-5 5 5"/></svg>
+        <div class="ridges"></div>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l5 5 5-5"/></svg>
+      </div>
     </div>
     <div class="mbtns">
       <button class="mbtn" data-btn="left">Left</button>
@@ -191,6 +211,7 @@
     <div class="field"><label>Scroll speed</label><input type="range" id="sScr" min="0.3" max="4" step="0.1"><span class="val" id="vScr"></span></div>
     <div class="field"><label>Laser speed</label><input type="range" id="sLas" min="1" max="6" step="0.1"><span class="val" id="vLas"></span></div>
     <div class="field"><label>Natural scrolling</label><input type="checkbox" id="sNat"></div>
+    <div class="field"><label>Scroll wheel</label><input type="checkbox" id="sWhl"></div>
     <div class="field native-only"><label>Bluetooth</label><button class="fbtn" id="btOpen">Devices</button></div>
     <p class="help native-only">Lectern is connected to your Mac as a Bluetooth mouse and keyboard, so nothing needs to run on the Mac. With the Lectern app running on the Mac (“Mac helper” at the top), scrolling is smooth and the laser draws a dot; without it, scrolling uses mouse-wheel steps and the laser area moves the pointer.</p>
     <p class="help web-only">Install this page as an app (Chrome menu → Install app, or Share → Add to Home Screen) to keep the pairing and open it full-screen.<br>Silence runs a Shortcut named “Lectern Focus” on the Mac.</p>
@@ -221,7 +242,7 @@
 
   // ---------- settings
   // v: bump when a default changes, so phones that saved the old defaults pick up the new one.
-  const defaults = { ptr: 1.6, scr: 1.0, las: 2.6, nat: true, v: 2 };
+  const defaults = { ptr: 1.6, scr: 1.0, las: 2.6, nat: true, whl: true, v: 2 };
   let S;
   try {
     const saved = JSON.parse(localStorage.getItem("lectern.s") || "{}");
@@ -234,6 +255,9 @@
     el.oninput = () => { S[k] = +el.value; $("#"+v).textContent = S[k].toFixed(1); save(); };
   });
   $("#sNat").checked = S.nat; $("#sNat").onchange = (e) => { S.nat = e.target.checked; save(); };
+  const showWheel = () => { $("#wheel").hidden = !S.whl; $("#padwrap").classList.toggle("has-wheel", S.whl); };
+  showWheel();
+  $("#sWhl").checked = S.whl; $("#sWhl").onchange = (e) => { S.whl = e.target.checked; save(); showWheel(); };
   const openSheet = (o) => { $("#sheet").classList.toggle("open", o); $("#sheetBg").classList.toggle("open", o); };
   $("#gear").onclick = () => openSheet(true);
   $("#sheetBg").onclick = () => openSheet(false);
@@ -393,6 +417,23 @@
   const centroid = (ts) => { let x = 0, y = 0; for (const t of ts) { x += t.clientX; y += t.clientY; } return [x / ts.length, y / ts.length]; };
   let momentum = null;
   const stopMomentum = () => { if (momentum) cancelAnimationFrame(momentum); momentum = null; };
+  const scrollK = () => S.scr * (S.nat ? 1 : -1);
+  // Momentum: integrate every frame but send at most ~20 messages/s (the Mac paces them
+  // into smooth steps), and stop sooner; a flick used to cost ~40 tiny messages.
+  function glide(vx, vy, onStep) {
+    if (Math.hypot(vx, vy) <= 0.25) return;
+    let last = performance.now(), sinceSend = 0;
+    const step = (t) => {
+      const dt = t - last; last = t; sinceSend += dt;
+      vx *= Math.pow(0.94, dt / 16); vy *= Math.pow(0.94, dt / 16);
+      acc.sx += vx * dt; acc.sy += vy * dt;
+      if (onStep) onStep(vy * dt);
+      if (Math.hypot(vx, vy) < 0.08) { momentum = null; queue(); return; }
+      if (sinceSend >= 48 || Math.hypot(acc.sx, acc.sy) >= 40) { sinceSend = 0; queue(); }
+      momentum = requestAnimationFrame(step);
+    };
+    momentum = requestAnimationFrame(step);
+  }
 
   pad.addEventListener("touchstart", (e) => {
     e.preventDefault(); pad.classList.add("used"); stopMomentum();
@@ -427,7 +468,7 @@
       G.lx = cx; G.ly = cy; G.lt = now;
       if (!G.moved && Math.hypot(cx - G.x0, cy - G.y0) > 8) G.moved = true;
       if (G.moved) {
-        const k = S.scr * (S.nat ? 1 : -1);
+        const k = scrollK();
         acc.sx += dx * k; acc.sy += dy * k; queue();
         G.vx = 0.7 * G.vx + 0.3 * (dx * k / dt); G.vy = 0.7 * G.vy + 0.3 * (dy * k / dt);
       }
@@ -446,23 +487,42 @@
     } else if ((G.mode === "two" || G.mode === "lift") && !G.moved && now - G.t0 < 320) {
       send({ t: "click", b: "right" });
     } else if ((G.mode === "two" || G.mode === "lift") && G.moved && now - G.lt < 60) {
-      // Momentum: integrate every frame but send at most ~20 messages/s (the Mac paces them
-      // into smooth steps), and stop sooner; a flick used to cost ~40 tiny messages.
-      let vx = G.vx, vy = G.vy, last = now, sinceSend = 0;
-      const step = (t) => {
-        const dt = t - last; last = t; sinceSend += dt;
-        vx *= Math.pow(0.94, dt / 16); vy *= Math.pow(0.94, dt / 16);
-        acc.sx += vx * dt; acc.sy += vy * dt;
-        if (Math.hypot(vx, vy) < 0.08) { momentum = null; queue(); return; }
-        if (sinceSend >= 48 || Math.hypot(acc.sx, acc.sy) >= 40) { sinceSend = 0; queue(); }
-        momentum = requestAnimationFrame(step);
-      };
-      if (Math.hypot(vx, vy) > 0.25) momentum = requestAnimationFrame(step);
+      glide(G.vx, G.vy);
     }
     G.mode = null; G.dragArmed = false;
   }
   pad.addEventListener("touchend", endPad, { passive: false });
   pad.addEventListener("touchcancel", endPad, { passive: false });
+
+  // ---------- scroll wheel: one finger, vertical only, same speed and momentum as two-finger scroll.
+  // It sits beside the pad (not inside it), so its touches never reach the pad's gestures.
+  const wheel = $("#wheel"), ridges = wheel.querySelector(".ridges");
+  const W = { id: null, ly: 0, lt: 0, vy: 0, roll: 0 };
+  const roll = (d) => { W.roll = (W.roll + d) % 8; ridges.style.backgroundPositionY = W.roll + "px"; }; // 8 = ridge pitch
+  const wheelTouch = (e) => { for (const t of e.changedTouches) if (t.identifier === W.id) return t; return null; };
+  wheel.addEventListener("touchstart", (e) => {
+    e.preventDefault(); stopMomentum(); pad.classList.add("used");
+    if (W.id !== null) return;
+    const t = e.changedTouches[0];
+    W.id = t.identifier; W.ly = t.clientY; W.lt = performance.now(); W.vy = 0;
+    wheel.classList.add("down");
+  }, { passive: false });
+  wheel.addEventListener("touchmove", (e) => {
+    e.preventDefault();
+    const t = wheelTouch(e); if (!t) return;
+    const now = performance.now(), dy = t.clientY - W.ly, dt = Math.max(now - W.lt, 1), k = scrollK();
+    W.ly = t.clientY; W.lt = now;
+    acc.sy += dy * k; queue(); roll(dy);
+    W.vy = 0.7 * W.vy + 0.3 * (dy * k / dt);
+  }, { passive: false });
+  const wheelEnd = (e) => {
+    e.preventDefault();
+    if (!wheelTouch(e)) return;
+    W.id = null; wheel.classList.remove("down");
+    if (performance.now() - W.lt < 60) glide(0, W.vy, (d) => roll(d / scrollK()));
+  };
+  wheel.addEventListener("touchend", wheelEnd, { passive: false });
+  wheel.addEventListener("touchcancel", wheelEnd, { passive: false });
 
   // physical-style buttons: hold Left and move with another finger to drag
   document.querySelectorAll("[data-btn]").forEach((b) => {
