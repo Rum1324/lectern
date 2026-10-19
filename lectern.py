@@ -30,12 +30,24 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(HERE, "web")
+
 CONF_DIR = os.path.expanduser("~/.config/lectern")
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 # mimetypes doesn't know .webmanifest, and .js must be text/javascript for the service worker
 STATIC_TYPES = {".webmanifest": "application/manifest+json", ".js": "text/javascript",
                 ".html": "text/html; charset=utf-8"}
+
+
+def page_version():
+    """Short hash of the phone page. Stamped into the page and sent in hello: a page that was
+    resumed or served from a cache sees a different value and reloads itself."""
+    try:
+        with open(os.path.join(WEB, "index.html"), "rb") as f:
+            return hashlib.sha1(f.read()).hexdigest()[:12]
+    except OSError:
+        return ""
+
 
 # macOS virtual key codes
 KEY = {"right": 124, "left": 123, "down": 125, "up": 126, "b": 11, "esc": 53, "space": 49,
@@ -728,6 +740,8 @@ class Server:
             return
         with open(fp, "rb") as f:
             body = f.read()
+        if path == "/index.html":
+            body = body.replace(b"__PAGE__", page_version().encode())
         ctype = STATIC_TYPES.get(os.path.splitext(fp)[1]) or \
             mimetypes.guess_type(fp)[0] or "application/octet-stream"
         await self._respond(writer, 200, body, ctype)
@@ -761,7 +775,7 @@ class Server:
         print("  phone connected:", peer[0] if peer else "?", flush=True)
         self.clients.add(writer)
         await ws_send(writer, {"t": "hello", "host": mac_name(),
-                               "trusted": self.backend.trusted()})
+                               "trusted": self.backend.trusted(), "page": page_version()})
         v = await volume("get", self.dry)
         if v:
             await ws_send(writer, v)

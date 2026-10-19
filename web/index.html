@@ -238,6 +238,7 @@
   // Android app: the page runs in a WebView and talks to the phone's Bluetooth HID code through
   // window.LecternNative (same JSON messages as the WebSocket) instead of the Mac server.
   const N = window.LecternNative || null;
+  const PAGE = "__PAGE__"; // the Mac fills in its page version (lectern.py page_version)
   if (N) document.body.classList.add("native");
 
   // ---------- settings
@@ -302,6 +303,12 @@
   }
   function handle(m) {
       if (m.t === "hello") {
+        // The Mac serves a newer page than this one (Lectern was updated, and this page was
+        // resumed or came from a cache): reload, at most once per version.
+        if (m.page && m.page !== PAGE) {
+          let seen = null; try { seen = sessionStorage.getItem("lectern.reload"); } catch (e) {}
+          if (seen !== m.page) { try { sessionStorage.setItem("lectern.reload", m.page); } catch (e) {} location.reload(); return; }
+        }
         host.textContent = m.host.replace(/\.local$/, "");
         const b = $("#banner");
         b.textContent = "Your Mac hasn’t given Accessibility permission to the terminal running Lectern, so clicks and keys are ignored. Enable it in System Settings → Privacy & Security → Accessibility, then restart Lectern.";

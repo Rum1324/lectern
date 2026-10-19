@@ -17,8 +17,8 @@ android {
         applicationId = "com.lectern.hid"
         minSdk = 28 // BluetoothHidDevice
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.5.1"
+        versionCode = 7
+        versionName = "0.5.2"
     }
     signingConfigs {
         if (signing.isNotEmpty()) create("release") {

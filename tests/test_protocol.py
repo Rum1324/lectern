@@ -217,6 +217,15 @@ class ProtocolTest(unittest.TestCase):
         self.assertIn("content-type: text/javascript", self.last_headers)
         self.assertEqual(self.http("/icon-512.png"), 200)
 
+    def test_page_version_stamped_and_in_hello(self):
+        ws = WS(self.port)
+        page = ws.recv_until("hello")["page"]
+        ws.close()
+        self.assertRegex(page, r"^[0-9a-f]{12}$")
+        self.assertEqual(self.http("/"), 200)
+        self.assertIn('const PAGE = "%s"' % page, self.last_body)  # a stale page sees a mismatch
+        self.assertNotIn("__PAGE__", self.last_body)
+
     def test_static_and_traversal(self):
         self.assertEqual(self.http("/"), 200)
         self.assertEqual(self.http("/icon.png"), 200)

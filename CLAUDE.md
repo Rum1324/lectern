@@ -11,7 +11,7 @@ Wi-Fi blocks phone→laptop traffic (verified 2026-10-07: run with `--tunnel` th
 
 | Part | Status |
 |---|---|
-| WebSocket protocol, pairing, HTTP serving | tested (`tests/test_protocol.py`, 17 tests, dry-run) |
+| WebSocket protocol, pairing, HTTP serving | tested (`tests/test_protocol.py`, 18 tests, dry-run) |
 | Phone gestures → events | tested (`tests/test_ui.py`, 10 tests, Chromium mobile viewport + CDP touch events) |
 | CoreGraphics ctypes calls (`MacBackend`) | verified: bounds, position, pointer move, scroll post correctly on Apple Silicon |
 | `laser.swift` overlay | verified: compiles with Xcode swiftc, window lands centred on the requested point at screen-saver level, hides on command |
@@ -33,7 +33,7 @@ python3 lectern.py --tunnel        # also opens a Cloudflare tunnel; needed on c
 python3 lectern.py --tunnel-setup lectern.<your-domain>   # one-time; needs `cloudflared tunnel login`
 python3 lectern.py --no-smooth     # post events on arrival (compare against the Pacer)
 python3 lectern.py --dry-run       # logs "[dry-run] ..." instead of posting events; any OS
-python3 -m unittest discover -s tests -v   # 27 tests, ~18 s; UI tests skip without Playwright
+python3 -m unittest discover -s tests -v   # 28 tests, ~18 s; UI tests skip without Playwright
 pip install playwright && python3 -m playwright install chromium   # for tests/test_ui.py
 ```
 
@@ -45,7 +45,7 @@ laser.swift       red-dot overlay; compiled by lectern.py with swiftc into ~/.co
 web/index.html    the whole phone app (HTML+CSS+JS, one file, no build step)
 web/pair.html     QR pairing page, served only to a browser on the Mac itself
 web/manifest.webmanifest  makes the page installable ("Install app") on Android Chrome over HTTPS
-web/sw.js         service worker: caches only the app shell (/, manifest, icons); never /ws
+web/sw.js         service worker: network-first app shell (/, icons), cache only as offline fallback; never /ws
 web/icon.png      home-screen icon (original); icon-192/512.png are sips resizes of it
 start.command     double-click launcher (terminal)
 app/              menu bar app: main.swift, LecternApp.swift (launcher for lectern.py),
@@ -67,7 +67,7 @@ release key is `~/.config/lectern/android-release.jks`, passwords in
 `~/.config/lectern/android-signing.properties` (both mode 600, never in the repo; back them up:
 losing the key means users must uninstall to update). Debug builds (adb) are signed with the
 machine's debug key and can't update a release install, or vice versa: uninstall first.
-Versions: v0.1.0 web + menu bar app; v0.5.0 Android Bluetooth app + Mac helper (2026-10-09); v0.5.1 one-finger scroll wheel (2026-10-19).
+Versions: v0.1.0 web + menu bar app; v0.5.0 Android Bluetooth app + Mac helper (2026-10-09); v0.5.1 one-finger scroll wheel; v0.5.2 updates reach an installed app (both 2026-10-19).
 
 ## Menu bar app
 
@@ -116,6 +116,12 @@ right-click → Open once. Apple's python3 (3.9) is what runs inside the app, he
 Phone page ⇄ WebSocket `/ws?k=<key>` ⇄ `Server.dispatch` → `Controller` → backend.
 With `--tunnel`: phone ⇄ Cloudflare edge ⇄ cloudflared (child process, `Tunnel`) ⇄ localhost.
 The page is a PWA when served over HTTPS: `manifest.webmanifest` + `sw.js` (shell cache only).
+Updates reach an installed app (2026-10-19; Sota's stayed on the old page): Android resumes the
+app instead of reloading it, and the old worker served its cached copy first. Now `sw.js` is
+network-first and, when it replaces an older worker, reloads open pages once; and lectern.py
+stamps `const PAGE = "__PAGE__"` with `page_version()` (hash of index.html) and sends it in
+`hello`, so a page that differs reloads itself (once per version, sessionStorage guard).
+Restarting Lectern is enough: the phone reconnects, sees the new version, reloads.
 The manifest is served only with `?k=<key>` (the page adds the link after it knows the key)
 and its `start_url` is `/?k=<key>`, so the installed app pairs even when the origin's
 localStorage is empty at launch (Sota hit "Not paired" with a plain `/` start_url).
@@ -136,7 +142,7 @@ Client → server messages (JSON text frames):
 | `focus` | – | runs Shortcut "Lectern Focus"; replies `{t:note, text}` |
 | `ping` | – | replies `pong`; phone sends every 5 s, server drops idle sockets after 30 s |
 
-Server → client: `hello {host, trusted}`, `vol`, `note`, `pong`.
+Server → client: `hello {host, trusted, page}`, `vol`, `note`, `pong`.
 
 Details that are easy to break:
 - Coordinates are CoreGraphics global (origin top-left of main display). `laser.swift`
